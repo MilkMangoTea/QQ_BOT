@@ -78,18 +78,6 @@ def out(tip, content):
     print(content)
     print("----------")
 
-# def upload(download_url):
-#     download_url = download_url.replace("https://", "http://")
-#     response = requests.get(download_url)
-#     headers = {'Authorization': '4WtmmSZXrXLMZHldKZTJlYteCMywVMlm'}
-#     files = {'smfile': response.content}
-#     url = 'https://sm.ms/api/v2/upload'
-#     res = requests.post(url, files=files, headers=headers)
-#     if res.json()["code"] == "success":
-#         return res.json()["data"]["url"]
-#     else:
-#         return res.json()["images"]
-
 def url_to_base64(url):
     try:
         url = url.replace("https", "http")
