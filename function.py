@@ -124,6 +124,8 @@ def url_to_base64(url):
 # 记录但不回复
 def remember_only(event, handle_pool, last_update_time, template_ask_messages):
     message = event.get("message")
+    if event["user_id"] == SELF_USER_ID:
+        return None
     msg_type = event.get("message_type")
     nickname = event.get("sender").get("nickname")
     temp_msg = nickname + ":"

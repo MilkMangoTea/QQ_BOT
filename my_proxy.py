@@ -6,13 +6,13 @@ from config import *
 from function import out, build_params, ran_emoji, ran_emoji_content, rep, url_to_base64, build_params_text_only, ran_rep_text_only, remember_only
 from openai import OpenAI
 
-CURRENT_LLM = LLM["DEEPSEEK-R1"]
+CURRENT_LLM = LLM["ALI-MAX"]
 LLM_NAME = CURRENT_LLM["NAME"]
 LLM_BASE_URL = CURRENT_LLM["URL"]
 LLM_KEY = CURRENT_LLM["KEY"]
 client = OpenAI(api_key = LLM_KEY, base_url = LLM_BASE_URL)
 
-template_ask_messages = [{"role": "system", "content": [{"type": "text", "text": PROMPT[0]}]}]
+template_ask_messages = [{"role": "system", "content": [{"type": "text", "text": PROMPT[2]}]}]
 handle_pool = {}
 last_update_time = {}
 
@@ -47,7 +47,6 @@ async def handle_message(websocket, event):
             if log["type"] == "image":
                 image_base64 = url_to_base64(log["data"]["url"])
                 handle_pool[current_id].append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}]})
-
         # 发送请求
         response = client.chat.completions.create(
             model = LLM_NAME,
@@ -84,7 +83,6 @@ async def qq_bot():
         async for message in ws:
             try:
                 event = json.loads(message)
-
                 # 响应"戳一戳"
                 if event.get("post_type") == "notice":
                     await ws.send(json.dumps({
