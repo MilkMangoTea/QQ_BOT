@@ -4,10 +4,13 @@ import requests
 import base64
 from config import *
 from urllib3.exceptions import InsecureRequestWarning
+import json
+import websockets
 
 # 请求构建器
 def build_params(type, event, content):
     msg_type = event.get("message_type")
+    base = ""
     if type == "text":
         base = {"message": [{"type": "text", "data": {"text": content}}]}
     elif type == "image":
@@ -59,7 +62,7 @@ def rep(event):
 def ran_emoji():
     random.seed(time.time())
     ran = random.randint(1,100)
-    print("表情包阈值:%d", ran)
+    print("表情包阈值:", ran)
     if ran <= RAN_EMOJI_PROBABILITY:
         return True
     return False
@@ -138,3 +141,22 @@ def remember_only(event, handle_pool, last_update_time, template_ask_messages):
         if log["type"] == "image":
             image_base64 = url_to_base64(log["data"]["url"])
             handle_pool[current_id].append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}]})
+
+# 控制台
+def special_event(event):
+    message = event.get("message")
+    cmd = message[0]["data"]["text"]
+    if cmd.startswith(CMD_PREFIX):
+        parts = cmd.split(" ", 1)
+        if len(parts) != 2:
+            print("⚠️ 格式错误，应为：/send 群号")
+            return
+        if parts[1] not in ALLOWED_GROUPS:
+            print("不合法的群聊！")
+            return
+
+        group_id = parts[1]
+        print(f"💬 正在向群 {group_id} 发送消息")
+
+        my_event = {"group_id": group_id, "message_type": "group"}
+        return my_event
