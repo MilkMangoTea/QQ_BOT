@@ -4,8 +4,6 @@ import requests
 import base64
 from config import *
 from urllib3.exceptions import InsecureRequestWarning
-import json
-import websockets
 
 # 请求构建器
 def build_params(type, event, content):
@@ -24,26 +22,18 @@ def build_params(type, event, content):
 
 # 随机文字池子
 def ran_rep_text_only():
-    random.seed(time.time())
-    ran = random.randint(0,len(POKE)-1)
-    return POKE[ran]
+    return random.choice(POKE)
 
 # 固定文字响应
 def build_params_text_only(event, content):
     base = {"message": [{"type": "text", "data": {"text": content}}]}
-    if "group_id" in event:
-        return {**base, "message_type": "group", "group_id": event["group_id"]}
-    else:
-        return {**base, "message_type": "text", "user_id": event["user_id"]}
+    msg_type = event.get("message_type")
+    key = "group_id" if msg_type == "group" else "user_id"
+    return {**base, "message_type": msg_type, key: event[key]}
 
 # 随机回复
 def ran_rep():
-    random.seed(time.time())
-    ran = random.randint(1,100)
-    print("回复阈值:", ran)
-    if ran <= RAN_REP_PROBABILITY:
-        return True
-    return False
+    return random.randint(1,100) <= RAN_REP_PROBABILITY
 
 # @回复
 def be_atted(event):
@@ -55,31 +45,18 @@ def be_atted(event):
 
 # 条件回复(随机回复，被@，管理员发言，私聊)
 def rep(event):
-    if ran_rep() or be_atted(event) or event.get("message_type") == "private":
-        return True
+    return ran_rep() or be_atted(event) or event.get("message_type") == "private"
 
 # 表情随机器
 def ran_emoji():
-    random.seed(time.time())
-    ran = random.randint(1,100)
-    print("表情包阈值:", ran)
-    if ran <= RAN_EMOJI_PROBABILITY:
-        return True
-    return False
+    return random.randint(1,100) <= RAN_EMOJI_PROBABILITY
 
 def ran_emoji_content(event):
-        random.seed(time.time())
-        image_id = random.randint(0,len(EMOJI_POOL)-1)
-        image_file = EMOJI_POOL[image_id]
-        print(image_file)
-        return build_params("image", event, image_file)
+    return build_params("image", event, random.choice(EMOJI_POOL))
 
 # 日志输出
 def out(tip, content):
-    print("----------")
-    print(tip)
-    print(content)
-    print("----------")
+    print(f"----------\n{tip}\n{content}\n----------")
 
 def url_to_base64(url):
     try:
@@ -134,7 +111,8 @@ def remember_only(event, handle_pool, last_update_time, template_ask_messages):
     for log in message:
         if log["type"] == "text":
             temp_msg += log["data"]["text"]
-    handle_pool[current_id].append({"role": "user", "content": [{"type": "text", "text": temp_msg}]})
+    if temp_msg != nickname + ":":
+        handle_pool[current_id].append({"role": "user", "content": [{"type": "text", "text": temp_msg}]})
     out("新输入:", temp_msg)
     # 提取图片
     for log in message:
@@ -144,19 +122,14 @@ def remember_only(event, handle_pool, last_update_time, template_ask_messages):
 
 # 控制台
 def special_event(event):
-    message = event.get("message")
-    cmd = message[0]["data"]["text"]
-    if cmd.startswith(CMD_PREFIX):
-        parts = cmd.split(" ", 1)
-        if len(parts) != 2:
-            print("⚠️ 格式错误，应为：/send 群号")
-            return
-        if parts[1] not in ALLOWED_GROUPS:
-            print("不合法的群聊！")
-            return
-
-        group_id = parts[1]
-        print(f"💬 正在向群 {group_id} 发送消息")
-
-        my_event = {"group_id": group_id, "message_type": "group"}
-        return my_event
+    try:
+        cmd = event.get("message")[0]["data"]["text"]
+        if cmd.startswith(CMD_PREFIX):
+            parts = cmd.split(" ", 1)
+            if len(parts) == 2 and parts[1] in ALLOWED_GROUPS:
+                print(f"💬 正在向群 {parts[1]} 发送消息")
+                return {"group_id": parts[1], "message_type": "group"}
+            print("⚠️ 格式错误或不合法的群聊")
+    except Exception as e:
+        print(f"❗ 控制台事件处理失败: {e}")
+        return None

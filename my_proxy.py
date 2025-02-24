@@ -6,7 +6,7 @@ from config import *
 from function import out, build_params, ran_emoji, ran_emoji_content, rep, url_to_base64, build_params_text_only, ran_rep_text_only, remember_only, special_event
 from openai import OpenAI
 
-CURRENT_LLM = LLM["ALI-MAX"]
+CURRENT_LLM = LLM["DEEPSEEK-V3"]
 LLM_NAME = CURRENT_LLM["NAME"]
 LLM_BASE_URL = CURRENT_LLM["URL"]
 LLM_KEY = CURRENT_LLM["KEY"]
@@ -54,7 +54,7 @@ async def handle_message(websocket, event):
         for log in message:
             if log["type"] == "text":
                 temp_msg += log["data"]["text"]
-        if temp_msg != "":
+        if temp_msg != nickname + ":":
             handle_pool[current_id].append({"role": "user", "content": [{"type": "text", "text": temp_msg}]})
 
         # 提取图片
