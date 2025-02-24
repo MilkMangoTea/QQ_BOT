@@ -24,11 +24,11 @@ def build_params(type, event, content):
 def ran_rep_text_only():
     return random.choice(POKE)
 
-# 固定文字响应
+# 戳一戳固定文字响应
 def build_params_text_only(event, content):
     base = {"message": [{"type": "text", "data": {"text": content}}]}
-    msg_type = event.get("message_type")
-    key = "group_id" if msg_type == "group" else "user_id"
+    key = "group_id" if "group_id" in event else "user_id"
+    msg_type = "group" if key == "group_id" else "private"
     return {**base, "message_type": msg_type, key: event[key]}
 
 # 随机回复
