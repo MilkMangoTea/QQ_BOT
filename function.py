@@ -89,37 +89,6 @@ def url_to_base64(url):
         print(f"处理异常: {str(e)}")
     return None
 
-# 记录但不回复
-def remember_only(event, handle_pool, last_update_time, template_ask_messages):
-    message = event.get("message")
-    if event["user_id"] == SELF_USER_ID:
-        return None
-    msg_type = event.get("message_type")
-    nickname = event.get("sender").get("nickname")
-    temp_msg = nickname + ":"
-    current_id = ""
-    if msg_type == "group":
-        current_id = event["group_id"]
-    elif msg_type == "private":
-        current_id = event["user_id"]
-
-    # 遗忘策略
-    if current_id not in handle_pool or time.time() - last_update_time[current_id] > HISTORY_TIMEOUT:
-        handle_pool[current_id] = template_ask_messages.copy()
-    last_update_time[current_id] = time.time()
-
-    for log in message:
-        if log["type"] == "text":
-            temp_msg += log["data"]["text"]
-    if temp_msg != nickname + ":":
-        handle_pool[current_id].append({"role": "user", "content": [{"type": "text", "text": temp_msg}]})
-    out("新输入:", temp_msg)
-    # 提取图片
-    for log in message:
-        if log["type"] == "image":
-            image_base64 = url_to_base64(log["data"]["url"])
-            handle_pool[current_id].append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}]})
-
 # 控制台
 def special_event(event):
     try:

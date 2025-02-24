@@ -3,7 +3,7 @@ import websockets
 import json
 import time
 from config import *
-from function import out, build_params, ran_emoji, ran_emoji_content, rep, url_to_base64, build_params_text_only, ran_rep_text_only, remember_only, special_event
+from function import out, build_params, ran_emoji, ran_emoji_content, rep, url_to_base64, build_params_text_only, ran_rep_text_only, special_event
 from openai import OpenAI
 
 CURRENT_LLM = LLM["DEEPSEEK-V3"]
@@ -30,8 +30,7 @@ async def send_message(websocket, params):
         "params": params
     }))
 
-async def handle_message(websocket, event):
-    """处理消息事件并发送回复"""
+def remember(event):
     try:
         # 获取消息类型和内容
         msg_type = event.get("message_type")
@@ -43,7 +42,6 @@ async def handle_message(websocket, event):
             current_id = event["group_id"]
         elif msg_type == "private":
             current_id = event["user_id"]
-        out("当前对话对象:", current_id)
 
         # 遗忘策略
         if current_id not in handle_pool or time.time() - last_update_time[current_id] > HISTORY_TIMEOUT:
@@ -56,13 +54,32 @@ async def handle_message(websocket, event):
                 temp_msg += log["data"]["text"]
         if temp_msg != nickname + ":":
             handle_pool[current_id].append({"role": "user", "content": [{"type": "text", "text": temp_msg}]})
-
+            out("新输入:", temp_msg)
         # 提取图片
         for log in message:
             if log["type"] == "image":
+                if CURRENT_LLM != LLM["ALI"]:
+                    out("识图功能已关闭",404)
+                    return
                 image_base64 = url_to_base64(log["data"]["url"])
                 handle_pool[current_id].append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}]})
 
+    except KeyError as e:
+        print(f"缺少必要字段: {e}")
+
+
+
+# 处理消息事件并发送回复
+async def handle_message(websocket, event):
+    try:
+        # 获取消息类型和内容
+        msg_type = event.get("message_type")
+        current_id = ""
+        if msg_type == "group":
+            current_id = event["group_id"]
+        elif msg_type == "private":
+            current_id = event["user_id"]
+        out("当前对话对象:", current_id)
         # 发送请求
         content = ai_completion(handle_pool[current_id])
 
@@ -110,7 +127,7 @@ async def qq_bot():
                 elif rep(event) :
                     await handle_message(ws, event)
                 else:
-                    remember_only(event, handle_pool, last_update_time, template_ask_messages)
+                    remember(event)
 
             except json.JSONDecodeError:
                 print("收到非JSON格式消息")
