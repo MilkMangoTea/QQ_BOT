@@ -80,7 +80,7 @@ def url_to_base64(url):
         # 验证内容类型是否为图片
         content_type = response.headers.get('Content-Type', '')
         if not content_type.startswith('image/'):
-            print(f"警告：URL未返回图片内容（Content-Type: {content_type}）")
+            print(f"⚠️ 警告：URL未返回图片内容（Content-Type: {content_type}）")
             return None
 
         # 编码为Base64字符串
@@ -89,9 +89,9 @@ def url_to_base64(url):
         return base64.b64encode(image_data).decode('utf-8')
         
     except requests.exceptions.RequestException as e:
-        print(f"请求失败: {str(e)}")
+        print(f"⚠️ 请求失败: {str(e)}")
     except Exception as e:
-        print(f"处理异常: {str(e)}")
+        print(f"⚠️ 处理异常: {str(e)}")
     return None
 
 # 导入最近十条聊天消息
@@ -112,7 +112,8 @@ async def get_nearby_message(websocket, event, llm):
             messages = data.get("data").get("messages")[-MESSAGE_COUNT:]
             for log1 in messages:
                 message = log1.get("message")
-                temp_msg = ""
+                nickname = log1.get("sender").get("nickname")
+                temp_msg = nickname + ""
                 for log2 in message:
                     if log2["type"] == "text":
                         temp_msg += log2["data"]["text"]
@@ -120,12 +121,12 @@ async def get_nearby_message(websocket, event, llm):
                         image_base64 = url_to_base64(log2["data"]["url"])
                         res.append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}]})
                 role = "user" if log1.get("user_id") != SELF_USER_ID else "assistant"
-                if temp_msg != "":
+                if temp_msg != nickname + "":
                     res.append({"role": role, "content": [{"type": "text", "text": temp_msg}]})
             return res
 
     except Exception as e:
-            print("获取群聊消息时发生错误:", str(e))
+            print("⚠️ 获取群聊消息时发生错误:", str(e))
 
 
 # 控制台
