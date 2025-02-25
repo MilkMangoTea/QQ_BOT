@@ -3,10 +3,10 @@ import websockets
 import json
 import time
 from config import *
-from function import out, build_params, ran_emoji, ran_emoji_content, rep, url_to_base64, build_params_text_only, ran_rep_text_only, special_event
+from function import out, build_params, ran_emoji, ran_emoji_content, rep, url_to_base64, build_params_text_only, ran_rep_text_only, special_event, get_nearby_message
 from openai import OpenAI
 
-CURRENT_LLM = LLM["DEEPSEEK-V3"]
+CURRENT_LLM = LLM["ALI"]
 LLM_NAME = CURRENT_LLM["NAME"]
 LLM_BASE_URL = CURRENT_LLM["URL"]
 LLM_KEY = CURRENT_LLM["KEY"]
@@ -30,7 +30,7 @@ async def send_message(websocket, params):
         "params": params
     }))
 
-def remember(event):
+async def remember(websocket ,event):
     try:
         # 获取消息类型和内容
         msg_type = event.get("message_type")
@@ -46,6 +46,7 @@ def remember(event):
         # 遗忘策略
         if current_id not in handle_pool or time.time() - last_update_time[current_id] > HISTORY_TIMEOUT:
             handle_pool[current_id] = template_ask_messages.copy()
+            handle_pool[current_id].extend(await get_nearby_message(websocket, event, CURRENT_LLM))
         last_update_time[current_id] = time.time()
 
         # 提取对话
@@ -119,15 +120,19 @@ async def qq_bot():
                 if event["user_id"] == int(TARGET_USER_ID) and event.get("message_type") == "private":
                     my_event = special_event(event)
                     group_id = int(my_event["group_id"])
-                    if group_id in handle_pool:
-                        content = ai_completion(handle_pool[group_id])
-                        await send_message(ws, build_params("text", my_event, content))
-                    else:
-                        print("群聊记忆不存在！")
+                    if group_id not in handle_pool:
+                        handle_pool[group_id] = template_ask_messages.copy()
+                        handle_pool[group_id].extend(await get_nearby_message(ws, my_event, CURRENT_LLM))
+                        last_update_time[group_id] = time.time()
+                    content = ai_completion(handle_pool[group_id])
+                    await send_message(ws, build_params("text", my_event, content))
+
                 elif rep(event) :
+                    await remember(ws, event)
                     await handle_message(ws, event)
+
                 else:
-                    remember(event)
+                    await remember(ws, event)
 
             except json.JSONDecodeError:
                 print("收到非JSON格式消息")

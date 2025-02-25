@@ -1,7 +1,12 @@
 import random
-import time
+import websockets
+import asyncio
+import json
 import requests
 import base64
+
+from sympy.printing.cxx import reserved
+
 from config import *
 from urllib3.exceptions import InsecureRequestWarning
 
@@ -88,6 +93,40 @@ def url_to_base64(url):
     except Exception as e:
         print(f"处理异常: {str(e)}")
     return None
+
+# 导入最近十条聊天消息
+async def get_nearby_message(websocket, event, llm):
+    try:
+        group_id = event["group_id"]
+        await websocket.send(json.dumps({
+            "action": "get_group_msg_history",
+            "params": {
+                "group_id": group_id,  # 替换成目标群号
+                "message_seq": 0  # 为0时从最新消息开始抓取
+            }
+        }))
+        response = await websocket.recv()
+        data = json.loads(response)
+        res = []
+        if data.get("status") == "ok":
+            messages = data.get("data").get("messages")[-MESSAGE_COUNT:]
+            for log1 in messages:
+                message = log1.get("message")
+                temp_msg = ""
+                for log2 in message:
+                    if log2["type"] == "text":
+                        temp_msg += log2["data"]["text"]
+                    elif log2["type"] == "image" and llm == LLM["ALI"] and log1.get("user_id") != SELF_USER_ID:
+                        image_base64 = url_to_base64(log2["data"]["url"])
+                        res.append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}]})
+                role = "user" if log1.get("user_id") != SELF_USER_ID else "assistant"
+                if temp_msg != "":
+                    res.append({"role": role, "content": [{"type": "text", "text": temp_msg}]})
+            return res
+
+    except Exception as e:
+            print("获取群聊消息时发生错误:", str(e))
+
 
 # 控制台
 def special_event(event):
