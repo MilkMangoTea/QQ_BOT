@@ -4,9 +4,6 @@ import asyncio
 import json
 import requests
 import base64
-
-from sympy.printing.cxx import reserved
-
 from config import *
 from urllib3.exceptions import InsecureRequestWarning
 
@@ -113,7 +110,9 @@ async def get_nearby_message(websocket, event, llm):
             for log1 in messages:
                 message = log1.get("message")
                 nickname = log1.get("sender").get("nickname")
-                temp_msg = nickname + ""
+                temp_msg = ""
+                if log1.get("user_id") != SELF_USER_ID:
+                    temp_msg = nickname + ": "
                 for log2 in message:
                     if log2["type"] == "text":
                         temp_msg += log2["data"]["text"]

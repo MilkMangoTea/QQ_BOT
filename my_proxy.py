@@ -117,9 +117,9 @@ async def qq_bot():
                     continue
 
                 # 验证发送者身份
-                if event["user_id"] == int(TARGET_USER_ID) and event.get("message_type") == "private":
+                if event["user_id"] == TARGET_USER_ID and event.get("message_type") == "private":
                     my_event = special_event(event)
-                    group_id = int(my_event["group_id"])
+                    group_id = my_event["group_id"]
                     if group_id not in handle_pool:
                         handle_pool[group_id] = template_ask_messages.copy()
                         handle_pool[group_id].extend(await get_nearby_message(ws, my_event, CURRENT_LLM))
