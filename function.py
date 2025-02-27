@@ -94,11 +94,14 @@ def url_to_base64(url):
 # 导入最近十条聊天消息
 async def get_nearby_message(websocket, event, llm):
     try:
-        group_id = event["group_id"]
+        msg_type = event.get("message_type")
+        key = "group_id" if msg_type == "group" else "user_id"
+        act = "get_group_msg_history" if msg_type == "group" else "get_friend_msg_history"
+        current_id = event[key]
         await websocket.send(json.dumps({
-            "action": "get_group_msg_history",
+            "action": act,
             "params": {
-                "group_id": group_id,  # 替换成目标群号
+                key: current_id,  # 替换成目标群号
                 "message_seq": 0  # 为0时从最新消息开始抓取
             }
         }))
@@ -133,11 +136,24 @@ def special_event(event):
     try:
         cmd = event.get("message")[0]["data"]["text"]
         if cmd.startswith(CMD_PREFIX):
-            parts = cmd.split(" ", 1)
-            if len(parts) == 2 and parts[1] in ALLOWED_GROUPS:
-                print(f"💬 正在向群 {parts[1]} 发送消息")
-                return {"group_id": parts[1], "message_type": "group"}
+            parts = cmd.split(" ", 2)
+
+            if len(parts) == 3 and parts[2] in ALLOWED_GROUPS:
+
+                target_type = parts[1]
+                target_id = parts[2]
+
+                if target_type == "群聊":
+                    print(f"💬 正在向群 {target_id} 发送消息")
+                    return {"group_id": target_id, "message_type": "group"}
+
+                elif target_type == "私聊":
+                    print(f"💬 正在向用户 {target_id} 发送消息")
+                    return {"user_id": target_id, "message_type": "private"}
+
             print("⚠️ 格式错误或不合法的群聊")
+            return None
+
     except Exception as e:
         print(f"❗ 控制台事件处理失败: {e}")
         return None

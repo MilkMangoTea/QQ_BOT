@@ -17,18 +17,32 @@ handle_pool = {}
 last_update_time = {}
 
 def ai_completion(message):
-    response = client.chat.completions.create(
-        model=LLM_NAME,
-        messages=message
-    )
-    # reasoning_content = response.choices[0].message.reasoning_content
-    return response.choices[0].message.content
+    try:
+        response = client.chat.completions.create(
+            model=LLM_NAME,
+            messages=message
+        )
+        # reasoning_content = response.choices[0].message.reasoning_content
+        return response.choices[0].message.content
+
+    except Exception as e:
+        # 捕获异常并打印错误信息
+        print(f"⚠️ 调用 OpenAI API 发生错误: {e}")
+        return None
 
 async def send_message(websocket, params):
-     await websocket.send(json.dumps({
-        "action": "send_msg",
-        "params": params
-    }))
+    try:
+        await websocket.send(json.dumps({
+            "action": "send_msg",
+            "params": params
+        }))
+
+    except websockets.exceptions.WebSocketException as e:
+        # 捕获 WebSocket 相关异常
+        print(f"⚠️ WebSocket 错误: {e}")
+    except Exception as e:
+        # 捕获其他类型的异常
+        print(f"⚠️ 发送消息时发生错误: {e}")
 
 async def remember(websocket ,event):
     try:
@@ -119,12 +133,12 @@ async def qq_bot():
                 # 验证发送者身份
                 if event["user_id"] == TARGET_USER_ID and event.get("message_type") == "private":
                     my_event = special_event(event)
-                    group_id = my_event["group_id"]
-                    if group_id not in handle_pool:
-                        handle_pool[group_id] = template_ask_messages.copy()
-                        handle_pool[group_id].extend(await get_nearby_message(ws, my_event, CURRENT_LLM))
-                        last_update_time[group_id] = time.time()
-                    content = ai_completion(handle_pool[group_id])
+                    current_id = my_event["group_id"] if my_event["message_type"] == "group" else my_event["user_id"]
+                    if current_id not in handle_pool:
+                        handle_pool[current_id] = template_ask_messages.copy()
+                        handle_pool[current_id].extend(await get_nearby_message(ws, my_event, CURRENT_LLM))
+                        last_update_time[current_id] = time.time()
+                    content = ai_completion(handle_pool[current_id])
                     await send_message(ws, build_params("text", my_event, content))
 
                 elif rep(event) :
