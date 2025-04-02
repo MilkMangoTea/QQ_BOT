@@ -15,12 +15,8 @@ def build_params(type, event, content):
         base = {"message": [{"type": "text", "data": {"text": content}}]}
     elif type == "image":
         base = {"message": [{"type": "image", "data": {"file": content, "sub_type": 1, "summary": "[色禽图片]"}}]}
-    if msg_type == "private":
-        return {**base, "message_type": msg_type, "user_id": event["user_id"]}
-    elif msg_type == "group":
-        return {**base, "message_type": msg_type, "group_id": event["group_id"]}
-    else:
-        return 
+    key = "user_id" if msg_type == "private" else "group_id"
+    return {**base, "message_type": msg_type, key: event[key]}
 
 # 随机文字池子
 def ran_rep_text_only():
@@ -101,7 +97,7 @@ async def get_nearby_message(websocket, event, llm):
         await websocket.send(json.dumps({
             "action": act,
             "params": {
-                key: current_id,  # 替换成目标群号
+                key: current_id,
                 "message_seq": 0  # 为0时从最新消息开始抓取
             }
         }))
@@ -115,16 +111,18 @@ async def get_nearby_message(websocket, event, llm):
                 nickname = log1.get("sender").get("nickname")
                 temp_msg = ""
                 if log1.get("user_id") != SELF_USER_ID:
-                    temp_msg = nickname + ": "
+                    temp_msg = nickname + ":"
                 for log2 in message:
-                    if log2["type"] == "text":
+                    if log2["type"] == "text" and log2["data"]["text"]!="":
                         temp_msg += log2["data"]["text"]
                     elif log2["type"] == "image" and llm == LLM["ALI"] and log1.get("user_id") != SELF_USER_ID:
                         image_base64 = url_to_base64(log2["data"]["url"])
                         res.append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}]})
-                role = "user" if log1.get("user_id") != SELF_USER_ID else "assistant"
-                if temp_msg != nickname + "":
-                    res.append({"role": role, "content": [{"type": "text", "text": temp_msg}]})
+                if temp_msg != nickname + ":" and temp_msg != "":
+                    if log1.get("user_id") != SELF_USER_ID:
+                        res.append({"role": "user", "content": [{"type": "text", "text": temp_msg}]})
+                    else:
+                        res.append({"role": "assistant", "content": temp_msg})
             return res
 
     except Exception as e:
@@ -153,6 +151,8 @@ def special_event(event):
 
             print("⚠️ 格式错误或不合法的群聊")
             return None
+        else:
+            return False
 
     except Exception as e:
         print(f"❗ 控制台事件处理失败: {e}")

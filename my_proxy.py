@@ -6,16 +6,17 @@ from config import *
 from function import out, build_params, ran_emoji, ran_emoji_content, rep, url_to_base64, build_params_text_only, ran_rep_text_only, special_event, get_nearby_message
 from openai import OpenAI
 
-CURRENT_LLM = LLM["ALI"]
+CURRENT_LLM = LLM["DEEPSEEK-V3"]
 LLM_NAME = CURRENT_LLM["NAME"]
 LLM_BASE_URL = CURRENT_LLM["URL"]
 LLM_KEY = CURRENT_LLM["KEY"]
 client = OpenAI(api_key = LLM_KEY, base_url = LLM_BASE_URL)
 
-template_ask_messages = [{"role": "system", "content": [{"type": "text", "text": PROMPT[2]}]}]
+template_ask_messages = [{"role": "system", "content": [{"type": "text", "text": PROMPT[0]}]}]
 handle_pool = {}
 last_update_time = {}
 
+# 大模型请求器(注意message不能为空，deepseek的assistant里面不能有text!)
 def ai_completion(message):
     try:
         response = client.chat.completions.create(
@@ -44,6 +45,7 @@ async def send_message(websocket, params):
         # 捕获其他类型的异常
         print(f"⚠️ 发送消息时发生错误: {e}")
 
+# 记忆函数
 async def remember(websocket ,event):
     try:
         # 获取消息类型和内容
@@ -61,6 +63,8 @@ async def remember(websocket ,event):
         if current_id not in handle_pool or time.time() - last_update_time[current_id] > HISTORY_TIMEOUT:
             handle_pool[current_id] = template_ask_messages.copy()
             handle_pool[current_id].extend(await get_nearby_message(websocket, event, CURRENT_LLM))
+            last_update_time[current_id] = time.time()
+            return
         last_update_time[current_id] = time.time()
 
         # 提取对话
@@ -104,7 +108,7 @@ async def handle_message(websocket, event):
         # 构造并发送API请求
         await send_message(websocket, build_params("text", event, content))
 
-        # 随机发送表情(不够简洁)
+        # 随机发送表情
         if ran_emoji():
             await send_message(websocket, ran_emoji_content(event))
 
@@ -131,7 +135,7 @@ async def qq_bot():
                     continue
 
                 # 验证发送者身份
-                if event["user_id"] == TARGET_USER_ID and event.get("message_type") == "private":
+                if special_event(event):
                     my_event = special_event(event)
                     current_id = my_event["group_id"] if my_event["message_type"] == "group" else my_event["user_id"]
                     if current_id not in handle_pool:
@@ -141,7 +145,7 @@ async def qq_bot():
                     content = ai_completion(handle_pool[current_id])
                     await send_message(ws, build_params("text", my_event, content))
 
-                elif rep(event) :
+                elif rep(event):
                     await remember(ws, event)
                     await handle_message(ws, event)
 

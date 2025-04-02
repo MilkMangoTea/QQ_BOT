@@ -2,7 +2,7 @@ import os
 # 配置参数
 
 # 导入的最近消息数量
-MESSAGE_COUNT = 10
+MESSAGE_COUNT = 5
 
 # 需要监听的目标用户QQ号
 TARGET_USER_ID = int(os.environ.get("MY_QQ_ID"))
@@ -14,10 +14,10 @@ WEBSOCKET_URI = "ws://127.0.0.1:8000"
 SELF_USER_ID = int(os.environ.get("BOT_QQ_ID"))
 
 # 随机回复概率
-RAN_REP_PROBABILITY = 2
+RAN_REP_PROBABILITY = -1
 
 # 回复表情包概率
-RAN_EMOJI_PROBABILITY = 40
+RAN_EMOJI_PROBABILITY = 100
 
 # 遗忘时间
 HISTORY_TIMEOUT = 1800
@@ -27,16 +27,8 @@ CMD_PREFIX = "/s"
 
 # 表情包池(请自行配置)
 EMOJI_POOL = [
-    "C75ADC79134118C3971D89FE13B5A8AC.jpg",
-    "D9DD1CA8AA3CC29BD8C406DB55F3F1BD.jpg",
-    "459D429386138BCE775705BD39C5666A.jpg",
-    "1CDEAACF65CC62701539241C1134408F.jpg",
-    "0C7BD656B69821E2A642C3F8A8E91266.jpg",
-    "AEB4EFA0F8AFAE02BE44349629AF63F9.jpg",
     "1188FB479104B480ED7CA1B9224309B8.jpg",#
-    "46FA0A8C68EC08AF0FDB42456F568C86.jpg",
     "7A434A63B051DDCD5174F137EBFB90EB.jpg",#
-    "17517EA2FC1A1CE39C70C4B9FBB34694.jpg",
     "248B25A23C7DD88BAF1A64E8143A61A3.jpg",#
     "D1FBA2328579B32D4CA27027BFF05158.jpg",#
     "C91C98F552DE51E8E96DD9C372029AA2.jpg",#
@@ -56,8 +48,7 @@ PROMPT = [
 """
     你是一个QQ机器人的AI助手，请遵守以下输出规则：
     1. 你收到信息的格式为'昵称：内容'，请不要分析用户昵称。
-    2. 你精通历史，知道cks是蒋介石。
-    3. akioi中，ak是动词，ioi是信息学赛事。
+    2. 用户正在进行工作，请你提供专业性的回答，回答需要尽可能详细。
 """,
 """
     你是一个正在参与群聊的人类用户，请严格遵守以下规则：

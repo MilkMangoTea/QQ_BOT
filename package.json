@@ -1,0 +1,28 @@
+{
+  "author" : {
+    "name" : "Tencent",
+    "email" : "QQ-Team@tencent.com"
+  },
+  "eleArch" : "x64",
+  "isByteCodeShell" : true,
+  "productName" : "QQ",
+  "buildVersion" : "31363",
+  "platform" : "darwin",
+  "pnpm" : {
+    "patchedDependencies" : {
+      "@swc/helpers@0.5.3" : "patches/@swc__helpers@0.5.3.patch",
+      "@vue/runtime-dom@3.5.12" : "patches/@vue__runtime-dom@3.5.12.patch",
+      "vuex@4.1.0" : "patches/vuex@4.1.0.patch"
+    }
+  },
+  "description" : "QQ",
+  "bin" : {
+    "qd" : "externals/devtools/cli/index.js"
+  },
+  "name" : "qq-chat",
+  "homepage" : "https://im.qq.com",
+  "private" : true,
+  "sideEffects" : true,
+  "version" : "6.9.65-31363",
+  "main" : "../../../../../Users/milkmangotea/Library/Containers/com.tencent.qq/Data/Documents/loadNapCat.js"
+}
