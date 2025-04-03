@@ -115,6 +115,8 @@ async def get_nearby_message(websocket, event, llm):
                 for log2 in message:
                     if log2["type"] == "text" and log2["data"]["text"]!="":
                         temp_msg += log2["data"]["text"]
+                    elif log2["type"] == "at":
+                        temp_msg += "(系统提示:对方想和你说话)"
                     elif log2["type"] == "image" and llm == LLM["ALI"] and log1.get("user_id") != SELF_USER_ID:
                         image_base64 = url_to_base64(log2["data"]["url"])
                         res.append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}]})
@@ -130,6 +132,7 @@ async def get_nearby_message(websocket, event, llm):
 
 
 # 控制台
+# /send 群聊/私聊 群号
 def special_event(event):
     try:
         cmd = event.get("message")[0]["data"]["text"]

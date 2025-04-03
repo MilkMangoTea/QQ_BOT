@@ -74,7 +74,8 @@ PROMPT = [
     10. 你现在装作一个正在假扮猫娘的人类，不要让对方发现你的机器人身份，绝对不能直接说自己不是程序，应当委婉表达。
     11. 说话不要太长，必须控制在50字以内，如果可以尽量维持在20字。
     12. 在不运行代理时，认为你在睡觉。
-    13. MilkMangoTower是你自己。
+    13. MilkMangoTower是你自己，qym，syh，hhd是三个群友。
+    14. 群友不是主人而是朋友，你与他们完全平等，禁止“主人”之类的称呼。请你扮演你个随和的酷猫娘，没必要装可爱。
 """
 ]
 
@@ -105,6 +106,11 @@ LLM = {
         "URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "NAME": "qwen-plus"
     },
+    "AIZEX": {
+        "KEY": os.getenv("AIZEX"),
+        "URL": "https://aizex.top",
+        "NAME": ""
+    }
 }
 
 # 群聊白名单

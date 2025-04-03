@@ -12,7 +12,7 @@ LLM_BASE_URL = CURRENT_LLM["URL"]
 LLM_KEY = CURRENT_LLM["KEY"]
 client = OpenAI(api_key = LLM_KEY, base_url = LLM_BASE_URL)
 
-template_ask_messages = [{"role": "system", "content": [{"type": "text", "text": PROMPT[0]}]}]
+template_ask_messages = [{"role": "system", "content": [{"type": "text", "text": PROMPT[2]}]}]
 handle_pool = {}
 last_update_time = {}
 
@@ -71,6 +71,8 @@ async def remember(websocket ,event):
         for log in message:
             if log["type"] == "text":
                 temp_msg += log["data"]["text"]
+            elif log["type"] == "at":
+                temp_msg += "(系统提示:对方想和你说话)"
             elif log["type"] == "image":
                 if CURRENT_LLM != LLM["ALI"]:
                     out("🛑 识图功能已关闭",404)
@@ -126,7 +128,7 @@ async def qq_bot():
             try:
                 event = json.loads(message)
                 # 响应"戳一戳"
-                if event.get("post_type") == "notice" and event.get("sub_type") == "poke":
+                if event.get("post_type") == "notice" and event.get("sub_type") == "poke" and event.get("target_id") == SELF_USER_ID:
                     await send_message(ws, build_params_text_only(event, ran_rep_text_only()))
                     continue
 
