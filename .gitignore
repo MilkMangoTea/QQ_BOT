@@ -3,3 +3,5 @@ test.py
 NapCatInstaller.app
 napcat_start.sh
 NapCatInstaller.zip
+__pycache__
+.idea
