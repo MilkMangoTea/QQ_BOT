@@ -123,5 +123,13 @@ def special_event(event):
         print(f"❗ 控制台事件处理失败: {e}")
         return None
 
-def strip_thinking(text: str) -> str:
-    return re.sub(r"Reasoning[\\s\\S]*?seconds\\s*", "", text).strip()
+# 处理 json 格式的回复
+def solve_json(response):
+    response = re.sub(r"Reasoning[\\s\\S]*?seconds\\s*", "", response).strip()
+    lines = response.splitlines()
+    if lines[0].startswith("```") and lines[-1].startswith("```"):
+        content = "\n".join(lines[1:-1])
+    else:
+        content = response
+    data = json.loads(content)
+    return data.get("response"), data.get("memory")

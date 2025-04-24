@@ -93,34 +93,12 @@ def dic_to_prompt_list(dic):
     list = [{"role": "system", "content": [{"type": "text", "text": text}]}]
     return list
 
-# 从回复中提取 key, value
-def get_memory(text):
-    pattern_tag = re.compile(r'<memory>(.*?)</memory>', re.DOTALL)
-    pattern_dic = re.compile(r'key:(?P<key>.*?)\s+value:(?P<value>.*)')
-
-    dic_input = {}
-    m_tag = pattern_tag.search(text)
-
-    for m in pattern_dic.finditer(m_tag.group(1)):
-        key = m.group("key")
-        value = m.group("value")
-        dic_input[key] = value
-
-    return dic_input
-
-def memory(response, current_id, memory_pool):
-    if "<memory>" not in response:
-        return response
-
-    else:
+def memory(memory_dict, current_id, memory_pool):
+    if memory_dict is not None:
         try:
             current_id = str(current_id)
-            dic_input = get_memory(response)
-            for k, v in dic_input.items():
+            for k, v in memory_dict.items():
                 memory_pool.set(current_id, k, v)
-
-            return re.sub(r"<memory>([\s\S]*?)</memory>", "", response).strip()
 
         except Exception as e:
             print(f"⚠️ memory 错误: {e}")
-

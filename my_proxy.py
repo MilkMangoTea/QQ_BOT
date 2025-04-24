@@ -24,9 +24,9 @@ def ai_completion(message, current_id):
             messages = new_message
         )
         out("原始信息：", response.choices[0].message.content)
-        response.choices[0].message.content = strip_thinking(response.choices[0].message.content)
-        response.choices[0].message.content = memory(response.choices[0].message.content, current_id, memory_pool)
-        return response.choices[0].message.content
+        content, memory_dict = solve_json(response.choices[0].message.content)
+        memory(memory_dict, current_id, memory_pool)
+        return content
 
     except Exception as e:
         # 捕获异常并打印错误信息

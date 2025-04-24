@@ -5,3 +5,4 @@ napcat_start.sh
 NapCatInstaller.zip
 __pycache__
 .idea
+memory_store.json
