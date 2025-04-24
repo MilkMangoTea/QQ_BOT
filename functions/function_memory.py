@@ -119,7 +119,8 @@ def memory(response, current_id, memory_pool):
             for k, v in dic_input.items():
                 memory_pool.set(current_id, k, v)
 
-            return re.sub(r"<memory>(.*?)</memory>", "", response).strip()
+            return re.sub(r"<memory>([\s\S]*?)</memory>", "", response).strip()
 
         except Exception as e:
             print(f"⚠️ memory 错误: {e}")
+

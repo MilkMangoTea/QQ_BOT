@@ -24,7 +24,7 @@ def ai_completion(message, current_id):
             messages = new_message
         )
         out("原始信息：", response.choices[0].message.content)
-        strip_thinking(response.choices[0].message.content)
+        response.choices[0].message.content = strip_thinking(response.choices[0].message.content)
         response.choices[0].message.content = memory(response.choices[0].message.content, current_id, memory_pool)
         return response.choices[0].message.content
 

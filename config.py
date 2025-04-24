@@ -20,7 +20,7 @@ RAN_REP_PROBABILITY = -1
 RAN_EMOJI_PROBABILITY = 80
 
 # 遗忘时间
-HISTORY_TIMEOUT = 1800
+HISTORY_TIMEOUT = 600
 
 # 控制台指令
 CMD_PREFIX = "/s"
@@ -52,8 +52,10 @@ PROMPT = [
         <memory>key:<关键词> value:<内容></memory>
         的记忆，然后该记忆会被储存并在每次对话调取。
         如果你希望修改这些记忆，只需用相同的 key 即可覆盖旧记忆。
-        修改或记录多个记忆只需在<memory></memory>内输出多行key,value即可，注意一定要换行。
+        修改或记录多个记忆只需在<memory></memory>内输出多行key,value即可，注意一定要换行，不要使用多个<memory></memory>，整个回复仅允许存在一个。
+        注意 key 和value 两个词不能省略，这是正则表达式的要求。
     3. 考虑到群友数量有限，我推荐你对每个群友进行分析并记忆，根据其性格回复。你可以根据昵称区分他们。比如将名字作为 key，性格作为 value，写在记忆中。
+    4. 你应当更加积极的去记忆，同时积极改写旧的记忆，尽量每一次都进行记忆。
 """,
 """
     你是一个正在参与群聊的人类用户，请严格遵守以下规则：
@@ -113,7 +115,7 @@ LLM = {
     "AIZEX": {
         "KEY": os.getenv("AIZEX"),
         "URL": "https://aizex.top/v1",
-        "NAME": "o4-mini"
+        "NAME": "gemini-2.5-pro-exp-03-25"
     }
 }
 
