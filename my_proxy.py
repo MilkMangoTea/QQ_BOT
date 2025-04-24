@@ -1,9 +1,7 @@
 import asyncio
 import websockets
-import json
 import time
-from config import *
-from function import out, build_params, ran_emoji, ran_emoji_content, rep, url_to_base64, build_params_text_only, ran_rep_text_only, special_event, get_nearby_message
+from functions.function import *
 from openai import OpenAI
 
 CURRENT_LLM = LLM["DEEPSEEK-V3"]
@@ -12,18 +10,22 @@ LLM_BASE_URL = CURRENT_LLM["URL"]
 LLM_KEY = CURRENT_LLM["KEY"]
 client = OpenAI(api_key = LLM_KEY, base_url = LLM_BASE_URL)
 
-template_ask_messages = [{"role": "system", "content": [{"type": "text", "text": PROMPT[2]}]}]
+template_ask_messages = [{"role": "system", "content": [{"type": "text", "text": PROMPT[0] + PROMPT[2]}]}]
 handle_pool = {}
 last_update_time = {}
+memory_pool = LocalDictStore()
 
 # 大模型请求器(注意message不能为空，deepseek的assistant里面不能有text!)
-def ai_completion(message):
+def ai_completion(message, current_id):
     try:
+        new_message = message + dic_to_prompt_list(memory_pool.get(str(current_id)))
         response = client.chat.completions.create(
-            model=LLM_NAME,
-            messages=message
+            model = LLM_NAME,
+            messages = new_message
         )
-        # reasoning_content = response.choices[0].message.reasoning_content
+        out("原始信息：", response.choices[0].message.content)
+        strip_thinking(response.choices[0].message.content)
+        response.choices[0].message.content = memory(response.choices[0].message.content, current_id, memory_pool)
         return response.choices[0].message.content
 
     except Exception as e:
@@ -72,7 +74,12 @@ async def remember(websocket ,event):
             if log["type"] == "text":
                 temp_msg += log["data"]["text"]
             elif log["type"] == "at":
-                temp_msg += "(系统提示:对方想和你说话)"
+                target_prompt = ""
+                if int(log.get("data").get("qq")) == SELF_USER_ID:
+                    target_prompt = "(系统提示:对方想和你说话)"
+                else:
+                    target_prompt = "(系统提示:对方在和其他人说话)"
+                temp_msg +=  target_prompt
             elif log["type"] == "image":
                 if CURRENT_LLM != LLM["ALI"]:
                     out("🛑 识图功能已关闭",404)
@@ -101,8 +108,9 @@ async def handle_message(websocket, event):
         elif msg_type == "private":
             current_id = event["user_id"]
         out("⏳ 当前对话对象:", current_id)
+
         # 发送请求
-        content = ai_completion(handle_pool[current_id])
+        content = ai_completion(handle_pool[current_id], current_id)
 
         handle_pool[current_id].append({"role": "assistant", "content": content})
         out("🏁 历史会话:", handle_pool[current_id])
@@ -136,7 +144,7 @@ async def qq_bot():
                 if event.get("post_type") != "message":
                     continue
 
-                # 验证发送者身份
+                # 验证发送者身份(控制台相关)
                 if special_event(event):
                     my_event = special_event(event)
                     current_id = my_event["group_id"] if my_event["message_type"] == "group" else my_event["user_id"]
@@ -144,7 +152,7 @@ async def qq_bot():
                         handle_pool[current_id] = template_ask_messages.copy()
                         handle_pool[current_id].extend(await get_nearby_message(ws, my_event, CURRENT_LLM))
                         last_update_time[current_id] = time.time()
-                    content = ai_completion(handle_pool[current_id])
+                    content = ai_completion(handle_pool[current_id], current_id)
                     await send_message(ws, build_params("text", my_event, content))
 
                 elif rep(event):
