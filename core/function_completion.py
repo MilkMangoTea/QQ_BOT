@@ -1,6 +1,5 @@
 import base64
 import requests
-from urllib3.exceptions import InsecureRequestWarning
 
 # 请求构建器
 def build_params(type, event, content):
@@ -26,7 +25,6 @@ def url_to_base64(url):
         }
 
         # 发起请求并设置10秒超时
-        requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
         response = requests.get(url, headers=headers, timeout=10, verify=False)
         response.raise_for_status()  # 检查HTTP错误状态码
 

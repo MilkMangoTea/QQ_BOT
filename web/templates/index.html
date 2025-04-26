@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QQ机器人管理系统</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container py-4">
+        <header class="pb-3 mb-4 border-bottom">
+            <h1 class="display-5 fw-bold">QQ机器人管理系统</h1>
+        </header>
+
+        <div class="row">
+            <!-- 状态面板 -->
+            <div class="col-md-6 mb-4">
+                <div class="card h-100">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">机器人状态</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="status-container">
+                            <div class="status-indicator">
+                                <span class="status-badge badge" id="status-badge">未知</span>
+                            </div>
+                            <div class="status-details mt-3">
+                                <p><strong>最后活动时间:</strong> <span id="last-activity">加载中...</span></p>
+                                <p><strong>记忆条目数:</strong> <span id="memory-count">加载中...</span></p>
+                            </div>
+                            <div class="mt-3">
+                                <button class="btn btn-success" id="start-bot">启动机器人</button>
+                                <button class="btn btn-danger" id="stop-bot">停止机器人</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 配置面板 -->
+            <div class="col-md-6 mb-4">
+                <div class="card h-100">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">配置管理</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="config-form">
+                            <div class="mb-3">
+                                <label for="websocket-uri" class="form-label">WebSocket URI</label>
+                                <input type="text" class="form-control" id="websocket-uri">
+                            </div>
+                            <div class="mb-3">
+                                <label for="self-user-id" class="form-label">机器人QQ号</label>
+                                <input type="text" class="form-control" id="self-user-id">
+                            </div>
+                            <div class="mb-3">
+                                <label for="ran-rep-probability" class="form-label">随机回复概率(%)</label>
+                                <input type="range" class="form-range" id="ran-rep-probability" min="0" max="100">
+                                <span id="ran-rep-value">50%</span>
+                            </div>
+                            <button type="submit" class="btn btn-primary">保存配置</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- 记忆管理 -->
+            <div class="col-md-12 mb-4">
+                <div class="card">
+                    <div class="card-header bg-success text-white">
+                        <h5 class="mb-0">记忆系统</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table" id="memory-table">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>内容预览</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- 这里将由JavaScript填充 -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 记忆详情模态框 -->
+    <div class="modal fade" id="memoryModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">记忆详情</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <pre id="memory-detail" class="bg-light p-3"></pre>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                    <button type="button" class="btn btn-danger" id="delete-memory">删除此记忆</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

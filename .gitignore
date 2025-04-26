@@ -1,8 +1,7 @@
 my_env
 test.py
 NapCatInstaller.app
-napcat_start.sh
-NapCatInstaller.zip
+requirements
 __pycache__
 .idea
 memory_store.json

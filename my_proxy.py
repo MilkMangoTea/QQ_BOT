@@ -1,10 +1,14 @@
 import asyncio
 import websockets
 import time
-from functions.function import *
+from core.function import *
 from openai import OpenAI
 
-CURRENT_LLM = LLM["AIZEX"]
+# 创建状态文件路径
+STATUS_FILE = os.path.join(os.path.dirname(__file__), "data", "bot_status.json")
+os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
+
+CURRENT_LLM = LLM["DEEPSEEK-V3"]
 LLM_NAME = CURRENT_LLM["NAME"]
 LLM_BASE_URL = CURRENT_LLM["URL"]
 LLM_KEY = CURRENT_LLM["KEY"]
@@ -13,6 +17,25 @@ client = OpenAI(api_key = LLM_KEY, base_url = LLM_BASE_URL)
 template_ask_messages = [{"role": "system", "content": [{"type": "text", "text": PROMPT[0] + PROMPT[3]}]}]
 handle_pool = {}
 last_update_time = {}
+
+
+# 更新状态文件，供Web界面读取
+def update_status(status="online", connections=None):
+    if connections is None:
+        connections = {}
+
+    status_data = {
+        "status": status,
+        "connections": connections,
+        "last_activity": time.time(),
+        "memory_count": len(LocalDictStore().list_ids())
+    }
+
+    try:
+        with open(STATUS_FILE, "w", encoding="utf-8") as f:
+            json.dump(status_data, f, ensure_ascii=False)
+    except Exception as e:
+        print(f"⚠️ 更新状态文件失败: {e}")
 
 # 大模型请求器(注意message不能为空，deepseek的assistant里面不能有text!)
 def ai_completion(message, current_id):
@@ -26,6 +49,10 @@ def ai_completion(message, current_id):
         out("原始信息：", response.choices[0].message.content)
         content, memory_dict = solve_json(response.choices[0].message.content)
         memory(memory_dict, current_id, memory_pool)
+
+        # 更新状态
+        update_status(connections=handle_pool)
+
         return content
 
     except Exception as e:
@@ -41,6 +68,9 @@ async def send_message(websocket, params):
             "action": "send_msg",
             "params": params
         }))
+
+        # 更新状态
+        update_status(connections=handle_pool)
 
     except websockets.exceptions.WebSocketException as e:
         # 捕获 WebSocket 相关异常
@@ -83,7 +113,7 @@ async def remember(websocket ,event):
                     target_prompt = "(系统提示:对方在和其他人说话)"
                 temp_msg +=  target_prompt
             elif log["type"] == "image":
-                if CURRENT_LLM != LLM["ALI"]:
+                if CURRENT_LLM != LLM["AIZEX"]:
                     out("🛑 识图功能已关闭",404)
                     continue
                 image_base64 = url_to_base64(log["data"]["url"])
@@ -93,6 +123,9 @@ async def remember(websocket ,event):
         if temp_msg != nickname + ":":
             handle_pool[current_id].append({"role": "user", "content": [{"type": "text", "text": temp_msg}]})
             out("✅ 新输入:", temp_msg)
+
+        # 更新状态
+        update_status(connections=handle_pool)
 
     except KeyError as e:
         print(f"⚠️ 缺少必要字段: {e}")
@@ -127,6 +160,9 @@ async def handle_message(websocket, event):
         print(f"✅ 已回复 {msg_type} 消息: {content}")
         print("#######################################")
 
+        # 更新状态
+        update_status(connections=handle_pool)
+
     except KeyError as e:
         print(f"⚠️ 缺少必要字段: {e}")
 
@@ -134,6 +170,10 @@ async def qq_bot():
     """主连接函数"""
     async with websockets.connect(WEBSOCKET_URI) as ws:
         print("✅ 成功连接到WebSocket服务器")
+
+        # 连接成功后更新状态
+        update_status("online")
+
         async for message in ws:
             try:
                 event = json.loads(message)
@@ -172,12 +212,23 @@ async def qq_bot():
 if __name__ == "__main__":
     while True:
         try:
+            # 启动时更新状态
+            update_status("starting")
+
             asyncio.get_event_loop().run_until_complete(qq_bot())
 
         except websockets.ConnectionClosed:
+
+            # 更新断开连接状态
+            update_status("disconnected")
+
             print("⏱️ 连接断开，尝试重连...")
             continue
 
         except KeyboardInterrupt:
+
+            # 更新终止状态
+            update_status("offline")
+
             print("🚫 程序已终止")
             break
