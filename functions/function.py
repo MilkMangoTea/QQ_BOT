@@ -131,5 +131,7 @@ def solve_json(response):
         content = "\n".join(lines[1:-1])
     else:
         content = response
+    if (content[0] not in ('{', '[')) or (content[-1] not in ('}', ']')):
+        return content, None
     data = json.loads(content)
     return data.get("response"), data.get("memory")

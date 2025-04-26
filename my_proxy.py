@@ -4,20 +4,20 @@ import time
 from functions.function import *
 from openai import OpenAI
 
-CURRENT_LLM = LLM["DEEPSEEK-V3"]
+CURRENT_LLM = LLM["AIZEX"]
 LLM_NAME = CURRENT_LLM["NAME"]
 LLM_BASE_URL = CURRENT_LLM["URL"]
 LLM_KEY = CURRENT_LLM["KEY"]
 client = OpenAI(api_key = LLM_KEY, base_url = LLM_BASE_URL)
 
-template_ask_messages = [{"role": "system", "content": [{"type": "text", "text": PROMPT[0] + PROMPT[2]}]}]
+template_ask_messages = [{"role": "system", "content": [{"type": "text", "text": PROMPT[0] + PROMPT[3]}]}]
 handle_pool = {}
 last_update_time = {}
-memory_pool = LocalDictStore()
 
 # 大模型请求器(注意message不能为空，deepseek的assistant里面不能有text!)
 def ai_completion(message, current_id):
     try:
+        memory_pool = LocalDictStore()
         new_message = message + dic_to_prompt_list(memory_pool.get(str(current_id)))
         response = client.chat.completions.create(
             model = LLM_NAME,
@@ -31,7 +31,9 @@ def ai_completion(message, current_id):
     except Exception as e:
         # 捕获异常并打印错误信息
         print(f"⚠️ 调用 OpenAI API 发生错误: {e}")
+
         return None
+
 
 async def send_message(websocket, params):
     try:
@@ -171,9 +173,11 @@ if __name__ == "__main__":
     while True:
         try:
             asyncio.get_event_loop().run_until_complete(qq_bot())
+
         except websockets.ConnectionClosed:
             print("⏱️ 连接断开，尝试重连...")
             continue
+
         except KeyboardInterrupt:
             print("🚫 程序已终止")
             break
