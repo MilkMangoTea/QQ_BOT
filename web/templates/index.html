@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -6,34 +5,71 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>QQ机器人管理系统</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-    <div class="container py-4">
-        <header class="pb-3 mb-4 border-bottom">
-            <h1 class="display-5 fw-bold">QQ机器人管理系统</h1>
+    <!-- 装饰圆形 -->
+    <div class="decorative-circle circle1"></div>
+    <div class="decorative-circle circle2"></div>
+    <div class="decorative-circle circle3"></div>
+    <div class="decorative-circle circle4"></div>
+
+    <!-- 主题切换按钮 -->
+    <button class="theme-toggle" id="theme-toggle">
+        <i class="fas fa-moon"></i>
+    </button>
+
+    <div class="container py-5">
+        <header class="pb-4 mb-5 text-center reveal">
+            <h1 class="display-4 fw-bold"><i class="fas fa-robot me-2"></i>QQ机器人管理系统</h1>
+            <p class="lead text-muted">优雅的对话机器人管理平台</p>
         </header>
 
         <div class="row">
             <!-- 状态面板 -->
-            <div class="col-md-6 mb-4">
+            <div class="col-md-6 mb-4 reveal">
                 <div class="card h-100">
                     <div class="card-header bg-primary text-white">
-                        <h5 class="mb-0">机器人状态</h5>
+                        <h5 class="mb-0"><i class="fas fa-heartbeat me-2"></i>机器人状态</h5>
                     </div>
                     <div class="card-body">
                         <div class="status-container">
-                            <div class="status-indicator">
-                                <span class="status-badge badge" id="status-badge">未知</span>
+                            <div class="status-indicator mb-3">
+                                <span class="status-badge badge" id="status-badge">
+                                    <i class="fas fa-circle-notch fa-spin me-2"></i>未知
+                                </span>
                             </div>
-                            <div class="status-details mt-3">
-                                <p><strong>最后活动时间:</strong> <span id="last-activity">加载中...</span></p>
-                                <p><strong>记忆条目数:</strong> <span id="memory-count">加载中...</span></p>
-                                <p><strong>当前LLM:</strong> <span id="current-llm">加载中...</span></p>
+                            <div class="status-details">
+                                <p><i class="fas fa-clock me-2"></i><strong>最后活动时间:</strong>
+                                    <span id="last-activity">
+                                        <span class="loading">
+                                            <span class="dot-third"></span>
+                                        </span>
+                                    </span>
+                                </p>
+                                <p><i class="fas fa-brain me-2"></i><strong>记忆条目数:</strong>
+                                    <span id="memory-count">
+                                        <span class="loading">
+                                            <span class="dot-third"></span>
+                                        </span>
+                                    </span>
+                                </p>
+                                <p><i class="fas fa-microchip me-2"></i><strong>当前LLM:</strong>
+                                    <span id="current-llm">
+                                        <span class="loading">
+                                            <span class="dot-third"></span>
+                                        </span>
+                                    </span>
+                                </p>
                             </div>
-                            <div class="mt-3">
-                                <button class="btn btn-success" id="start-bot">启动机器人</button>
-                                <button class="btn btn-danger" id="stop-bot">停止机器人</button>
+                            <div class="mt-4">
+                                <button class="btn btn-success" id="start-bot">
+                                    <i class="fas fa-play me-2"></i>启动机器人
+                                </button>
+                                <button class="btn btn-danger" id="stop-bot">
+                                    <i class="fas fa-stop me-2"></i>停止机器人
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -41,47 +77,65 @@
             </div>
 
             <!-- 配置面板 -->
-            <div class="col-md-6 mb-4">
+            <div class="col-md-6 mb-4 reveal">
                 <div class="card h-100">
                     <div class="card-header bg-info text-white">
-                        <h5 class="mb-0">配置管理</h5>
+                        <h5 class="mb-0"><i class="fas fa-cogs me-2"></i>配置管理</h5>
                     </div>
                     <div class="card-body">
                         <form id="config-form">
                             <div class="mb-3">
-                                <label for="websocket-uri" class="form-label">WebSocket URI</label>
-                                <input type="text" class="form-control" id="websocket-uri">
+                                <label for="websocket-uri" class="form-label">
+                                    <i class="fas fa-link me-2"></i>WebSocket URI
+                                </label>
+                                <input type="text" class="form-control" id="websocket-uri" placeholder="ws://example.com/ws">
                             </div>
                             <div class="mb-3">
-                                <label for="self-user-id" class="form-label">机器人QQ号</label>
-                                <input type="text" class="form-control" id="self-user-id">
+                                <label for="self-user-id" class="form-label">
+                                    <i class="fas fa-id-card me-2"></i>机器人QQ号
+                                </label>
+                                <input type="text" class="form-control" id="self-user-id" placeholder="输入QQ号">
                             </div>
                             <div class="mb-3">
-                                <label for="message-count" class="form-label">导入的最近消息数量</label>
-                                <input type="number" class="form-control" id="message-count" min="1">
+                                <label for="message-count" class="form-label">
+                                    <i class="fas fa-history me-2"></i>导入的最近消息数量
+                                </label>
+                                <input type="number" class="form-control" id="message-count" min="1" placeholder="1-100">
                             </div>
                             <div class="mb-3">
-                                <label for="ran-rep-probability" class="form-label">随机回复概率(%)</label>
-                                <input type="range" class="form-range" id="ran-rep-probability" min="0" max="100">
-                                <span id="ran-rep-value">50%</span>
+                                <label for="ran-rep-probability" class="form-label">
+                                    <i class="fas fa-random me-2"></i>随机回复概率
+                                </label>
+                                <div class="d-flex align-items-center">
+                                    <input type="range" class="form-range flex-grow-1" id="ran-rep-probability" min="0" max="100">
+                                    <span id="ran-rep-value">50%</span>
+                                </div>
                             </div>
                             <div class="mb-3">
-                                <label for="history-timeout" class="form-label">遗忘时间(秒)</label>
-                                <input type="number" class="form-control" id="history-timeout" min="0">
+                                <label for="history-timeout" class="form-label">
+                                    <i class="fas fa-hourglass-half me-2"></i>遗忘时间(秒)
+                                </label>
+                                <input type="number" class="form-control" id="history-timeout" min="0" placeholder="600">
                             </div>
                             <div class="mb-3">
-                                <label for="current-prompt" class="form-label">当前提示词</label>
+                                <label for="current-prompt" class="form-label">
+                                    <i class="fas fa-comment-dots me-2"></i>当前提示词
+                                </label>
                                 <select class="form-select" id="current-prompt">
                                     <!-- 这里将由JavaScript根据PROMPT数组动态填充 -->
                                 </select>
                             </div>
                             <div class="mb-3">
-                                <label for="current-completion" class="form-label">当前LLM</label>
+                                <label for="current-completion" class="form-label">
+                                    <i class="fas fa-brain me-2"></i>当前LLM
+                                </label>
                                 <select class="form-select" id="current-completion">
                                     <!-- 这里将由JavaScript根据LLM对象动态填充 -->
                                 </select>
                             </div>
-                            <button type="submit" class="btn btn-primary">保存配置</button>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save me-2"></i>保存配置
+                            </button>
                         </form>
                     </div>
                 </div>
@@ -90,22 +144,27 @@
 
         <div class="row">
             <!-- 群聊白名单管理 -->
-            <div class="col-md-6 mb-4">
+            <div class="col-md-6 mb-4 reveal">
                 <div class="card">
                     <div class="card-header bg-warning text-dark">
-                        <h5 class="mb-0">群聊白名单</h5>
+                        <h5 class="mb-0"><i class="fas fa-users me-2"></i>群聊白名单</h5>
                     </div>
                     <div class="card-body">
-                        <div class="mb-3">
-                            <input type="number" class="form-control" id="new-group-id" placeholder="输入群号">
-                            <button class="btn btn-primary mt-2" id="add-group">添加群聊</button>
+                        <div class="mb-4">
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="fas fa-search"></i></span>
+                                <input type="number" class="form-control" id="new-group-id" placeholder="输入群号">
+                                <button class="btn btn-primary" id="add-group">
+                                    <i class="fas fa-plus me-2"></i>添加群聊
+                                </button>
+                            </div>
                         </div>
                         <div class="table-responsive">
                             <table class="table" id="groups-table">
                                 <thead>
                                     <tr>
-                                        <th>群号</th>
-                                        <th>操作</th>
+                                        <th><i class="fas fa-hashtag me-2"></i>群号</th>
+                                        <th><i class="fas fa-tools me-2"></i>操作</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -118,19 +177,19 @@
             </div>
 
             <!-- 记忆管理 -->
-            <div class="col-md-6 mb-4">
+            <div class="col-md-6 mb-4 reveal">
                 <div class="card">
                     <div class="card-header bg-success text-white">
-                        <h5 class="mb-0">记忆系统</h5>
+                        <h5 class="mb-0"><i class="fas fa-brain me-2"></i>记忆系统</h5>
                     </div>
                     <div class="card-body">
                         <div class="table-responsive">
                             <table class="table" id="memory-table">
                                 <thead>
                                     <tr>
-                                        <th>ID</th>
-                                        <th>内容预览</th>
-                                        <th>操作</th>
+                                        <th><i class="fas fa-fingerprint me-2"></i>ID</th>
+                                        <th><i class="fas fa-file-alt me-2"></i>内容预览</th>
+                                        <th><i class="fas fa-tools me-2"></i>操作</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -149,22 +208,33 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">记忆详情</h5>
+                    <h5 class="modal-title"><i class="fas fa-brain me-2"></i>记忆详情</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
                     <pre id="memory-detail" class="bg-light p-3"></pre>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
-                    <button type="button" class="btn btn-danger" id="delete-memory">删除此记忆</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-2"></i>关闭
+                    </button>
+                    <button type="button" class="btn btn-danger" id="delete-memory">
+                        <i class="fas fa-trash-alt me-2"></i>删除此记忆
+                    </button>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- 页脚 -->
+    <footer class="text-center text-muted py-4 reveal">
+        <div class="container">
+            <p>QQ机器人管理系统 &copy; 2025</p>
+            <p class="small">使用先进的AI技术，让对话更智能</p>
+        </div>
+    </footer>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
-</html>
-```

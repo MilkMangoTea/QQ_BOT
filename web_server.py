@@ -24,12 +24,10 @@ bot_status = {
     "memory_count": 0
 }
 
-
 # 首页
 @app.route('/')
 def index():
     return render_template('index.html')
-
 
 # 获取机器人状态
 @app.route('/api/status')
