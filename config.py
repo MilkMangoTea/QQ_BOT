@@ -1,4 +1,5 @@
 import os
+
 # 配置参数
 
 # 导入的最近消息数量(这个数量至少为1,否则不引入最新内容)
@@ -14,13 +15,13 @@ WEBSOCKET_URI = "ws://127.0.0.1:8000"
 SELF_USER_ID = int(os.environ.get("BOT_QQ_ID"))
 
 # 随机回复概率
-RAN_REP_PROBABILITY = -1
+RAN_REP_PROBABILITY = 0
 
 # 回复表情包概率
 RAN_EMOJI_PROBABILITY = 80
 
 # 遗忘时间
-HISTORY_TIMEOUT = 60
+HISTORY_TIMEOUT = 600
 
 # 控制台指令
 CMD_PREFIX = "/s"
@@ -42,6 +43,8 @@ POKE = [
     "戳你码喵~",
     "114514喵~"
 ]
+
+CURRENT_PROMPT = 0
 
 # 提示词
 PROMPT = [
@@ -125,6 +128,8 @@ PROMPT = [
 ]
 
 # llm state
+CURRENT_COMPLETION = "DEEPSEEK-V3"
+
 LLM = {
     "DEEPSEEK-V3": {
         "KEY": os.getenv("DEEPSEEK"),
@@ -154,9 +159,9 @@ LLM = {
     "AIZEX": {
         "KEY": os.getenv("AIZEX"),
         "URL": "https://a1.aizex.me/v1",
-        "NAME": "gemini-2.5-pro-exp-03-25"
+        "NAME": "o4-mini-all"
     }
 }
 
 # 群聊白名单
-ALLOWED_GROUPS = ["947805255", "1029247118", "964241282", "792513228", "2248341252"]
+ALLOWED_GROUPS = [947805255, 1029247118, 964241282, 792513228, 2248341252]

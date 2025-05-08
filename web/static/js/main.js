@@ -1,6 +1,8 @@
 // 全局变量
 let currentMemoryId = null;
 let memoryData = {};
+let promptOptions = [];
+let llmOptions = {};
 
 // DOM 加载完成后执行
 document.addEventListener('DOMContentLoaded', function() {
@@ -8,7 +10,7 @@ document.addEventListener('DOMContentLoaded', function() {
     updateStatus();
     loadConfig();
     loadMemories();
-
+    
     // 每10秒更新一次状态
     setInterval(updateStatus, 10000);
 
@@ -17,6 +19,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('stop-bot').addEventListener('click', stopBot);
     document.getElementById('config-form').addEventListener('submit', saveConfig);
     document.getElementById('delete-memory').addEventListener('click', deleteMemory);
+    document.getElementById('add-group').addEventListener('click', addGroup);
 
     // 回复率滑块实时更新显示的值
     const ranRepSlider = document.getElementById('ran-rep-probability');
@@ -39,6 +42,7 @@ function updateStatus() {
 
             document.getElementById('last-activity').textContent = data.last_activity;
             document.getElementById('memory-count').textContent = data.memory_count;
+            document.getElementById('current-llm').textContent = data.current_llm || '未知';
         })
         .catch(error => console.error('获取状态失败:', error));
 }
@@ -48,14 +52,124 @@ function loadConfig() {
     fetch('/api/config')
         .then(response => response.json())
         .then(data => {
+            // 基本配置
             document.getElementById('websocket-uri').value = data.WEBSOCKET_URI || '';
             document.getElementById('self-user-id').value = data.SELF_USER_ID || '';
-
+            document.getElementById('message-count').value = data.MESSAGE_COUNT || 1;
+            document.getElementById('history-timeout').value = data.HISTORY_TIMEOUT || 600;
+            
+            // 随机回复率
             const slider = document.getElementById('ran-rep-probability');
-            slider.value = data.RAN_REP_PROBABILITY || 50;
+            slider.value = data.RAN_REP_PROBABILITY || 0;
             document.getElementById('ran-rep-value').textContent = slider.value + '%';
+            
+            // 提示词选项
+            promptOptions = data.PROMPT || [];
+            const promptSelect = document.getElementById('current-prompt');
+            promptSelect.innerHTML = '';
+            promptOptions.forEach((_, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = `提示词 ${index}`;
+                promptSelect.appendChild(option);
+            });
+            
+            // 设置当前选中的提示词
+            promptSelect.value = data.CURRENT_PROMPT || 0;
+            
+            // LLM选项
+            llmOptions = data.LLM || {};
+            const llmSelect = document.getElementById('current-completion');
+            llmSelect.innerHTML = '';
+            
+            for (const key in llmOptions) {
+                const option = document.createElement('option');
+                option.value = key;
+                option.textContent = `${key} (${llmOptions[key].NAME})`;
+                llmSelect.appendChild(option);
+            }
+            
+            // 设置当前选中的LLM
+            llmSelect.value = data.CURRENT_COMPLETION || '';
+            
+            // 加载群聊白名单
+            loadGroups(data.ALLOWED_GROUPS || []);
         })
         .catch(error => console.error('加载配置失败:', error));
+}
+
+// 加载群聊白名单
+function loadGroups(groups) {
+    const tableBody = document.getElementById('groups-table').getElementsByTagName('tbody')[0];
+    tableBody.innerHTML = '';
+    
+    groups.forEach(groupId => {
+        const row = tableBody.insertRow();
+        row.insertCell(0).textContent = groupId;
+        
+        const actionsCell = row.insertCell(1);
+        actionsCell.innerHTML = `
+            <button class="btn btn-sm btn-danger delete-group" data-id="${groupId}">删除</button>
+        `;
+        
+        // 为删除按钮添加事件
+        actionsCell.querySelector('.delete-group').addEventListener('click', function() {
+            if (confirm(`确定要删除群号: ${groupId} 吗？`)) {
+                removeGroup(groupId);
+            }
+        });
+    });
+}
+
+// 添加群聊
+function addGroup() {
+    const groupId = document.getElementById('new-group-id').value;
+    if (!groupId || isNaN(parseInt(groupId))) {
+        alert('请输入有效的群号');
+        return;
+    }
+    
+    fetch('/api/groups', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ groupId: parseInt(groupId) })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            document.getElementById('new-group-id').value = '';
+            loadConfig(); // 重新加载配置
+            alert('群聊已添加');
+        } else {
+            alert('添加失败: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('添加群聊错误:', error);
+        alert('发生错误，请查看控制台');
+    });
+}
+
+// 删除群聊
+function removeGroup(groupId) {
+    fetch(`/api/groups/${groupId}`, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            loadConfig(); // 重新加载配置
+            alert('群聊已删除');
+        } else {
+            alert('删除失败: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('删除群聊错误:', error);
+        alert('发生错误，请查看控制台');
+    });
 }
 
 // 保存配置
@@ -65,7 +179,11 @@ function saveConfig(event) {
     const config = {
         WEBSOCKET_URI: document.getElementById('websocket-uri').value,
         SELF_USER_ID: document.getElementById('self-user-id').value,
-        RAN_REP_PROBABILITY: parseInt(document.getElementById('ran-rep-probability').value)
+        MESSAGE_COUNT: parseInt(document.getElementById('message-count').value) || 1,
+        RAN_REP_PROBABILITY: parseInt(document.getElementById('ran-rep-probability').value),
+        HISTORY_TIMEOUT: parseInt(document.getElementById('history-timeout').value) || 600,
+        CURRENT_PROMPT: parseInt(document.getElementById('current-prompt').value) || 0,
+        CURRENT_COMPLETION: document.getElementById('current-completion').value
     };
 
     fetch('/api/config', {

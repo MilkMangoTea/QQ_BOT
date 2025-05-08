@@ -3,18 +3,18 @@ import websockets
 import time
 from core.function import *
 from openai import OpenAI
+import os
 
 # 创建状态文件路径
 STATUS_FILE = os.path.join(os.path.dirname(__file__), "data", "bot_status.json")
 os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
 
-CURRENT_LLM = LLM["DEEPSEEK-V3"]
+CURRENT_LLM = config.LLM[config.CURRENT_COMPLETION]
 LLM_NAME = CURRENT_LLM["NAME"]
 LLM_BASE_URL = CURRENT_LLM["URL"]
 LLM_KEY = CURRENT_LLM["KEY"]
-client = OpenAI(api_key = LLM_KEY, base_url = LLM_BASE_URL)
 
-template_ask_messages = [{"role": "system", "content": [{"type": "text", "text": PROMPT[0] + PROMPT[3]}]}]
+template_ask_messages = [{"role": "system", "content": [{"type": "text", "text": config.PROMPT[0] + config.PROMPT[config.CURRENT_PROMPT]}]}]
 handle_pool = {}
 last_update_time = {}
 
@@ -40,6 +40,13 @@ def update_status(status="online", connections=None):
 # 大模型请求器(注意message不能为空，deepseek的assistant里面不能有text!)
 def ai_completion(message, current_id):
     try:
+        global CURRENT_LLM, LLM_NAME, LLM_BASE_URL, LLM_KEY
+        CURRENT_LLM = config.LLM[config.CURRENT_COMPLETION]
+        LLM_NAME = CURRENT_LLM["NAME"]
+        LLM_BASE_URL = CURRENT_LLM["URL"]
+        LLM_KEY = CURRENT_LLM["KEY"]
+        client = OpenAI(api_key=LLM_KEY, base_url=LLM_BASE_URL)
+
         memory_pool = LocalDictStore()
         new_message = message + dic_to_prompt_list(memory_pool.get(str(current_id)))
         response = client.chat.completions.create(
@@ -61,14 +68,13 @@ def ai_completion(message, current_id):
 
         return None
 
-
+# QQ 消息发送器
 async def send_message(websocket, params):
     try:
         await websocket.send(json.dumps({
             "action": "send_msg",
             "params": params
         }))
-
         # 更新状态
         update_status(connections=handle_pool)
 
@@ -94,7 +100,7 @@ async def remember(websocket ,event):
             current_id = event["user_id"]
 
         # 遗忘策略
-        if current_id not in handle_pool or time.time() - last_update_time[current_id] > HISTORY_TIMEOUT:
+        if current_id not in handle_pool or time.time() - last_update_time[current_id] > config.HISTORY_TIMEOUT:
             handle_pool[current_id] = template_ask_messages.copy()
             handle_pool[current_id].extend(await get_nearby_message(websocket, event, CURRENT_LLM))
             last_update_time[current_id] = time.time()
@@ -106,14 +112,13 @@ async def remember(websocket ,event):
             if log["type"] == "text":
                 temp_msg += log["data"]["text"]
             elif log["type"] == "at":
-                target_prompt = ""
-                if int(log.get("data").get("qq")) == SELF_USER_ID:
+                if int(log.get("data").get("qq")) == config.SELF_USER_ID:
                     target_prompt = "(系统提示:对方想和你说话)"
                 else:
                     target_prompt = "(系统提示:对方在和其他人说话)"
                 temp_msg +=  target_prompt
             elif log["type"] == "image":
-                if CURRENT_LLM != LLM["AIZEX"]:
+                if CURRENT_LLM != config.LLM["AIZEX"]:
                     out("🛑 识图功能已关闭",404)
                     continue
                 image_base64 = url_to_base64(log["data"]["url"])
@@ -168,17 +173,21 @@ async def handle_message(websocket, event):
 
 async def qq_bot():
     """主连接函数"""
-    async with websockets.connect(WEBSOCKET_URI) as ws:
+    async with websockets.connect(config.WEBSOCKET_URI) as ws:
         print("✅ 成功连接到WebSocket服务器")
 
         # 连接成功后更新状态
         update_status("online")
 
+        # 注册信号处理函数
+        signal.signal(signal.SIGUSR1, reload_config)
+        print("已注册配置重载信号处理函数")
+
         async for message in ws:
             try:
                 event = json.loads(message)
                 # 响应"戳一戳"
-                if event.get("post_type") == "notice" and event.get("sub_type") == "poke" and event.get("target_id") == SELF_USER_ID:
+                if event.get("post_type") == "notice" and event.get("sub_type") == "poke" and event.get("target_id") == config.SELF_USER_ID:
                     await send_message(ws, build_params_text_only(event, ran_rep_text_only()))
                     continue
 
@@ -186,7 +195,6 @@ async def qq_bot():
                 if event.get("post_type") != "message":
                     continue
 
-                # 验证发送者身份(控制台相关)
                 if special_event(event):
                     my_event = special_event(event)
                     current_id = my_event["group_id"] if my_event["message_type"] == "group" else my_event["user_id"]
@@ -229,6 +237,5 @@ if __name__ == "__main__":
 
             # 更新终止状态
             update_status("offline")
-
             print("🚫 程序已终止")
             break

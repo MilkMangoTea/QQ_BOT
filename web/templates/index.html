@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -28,6 +29,7 @@
                             <div class="status-details mt-3">
                                 <p><strong>最后活动时间:</strong> <span id="last-activity">加载中...</span></p>
                                 <p><strong>记忆条目数:</strong> <span id="memory-count">加载中...</span></p>
+                                <p><strong>当前LLM:</strong> <span id="current-llm">加载中...</span></p>
                             </div>
                             <div class="mt-3">
                                 <button class="btn btn-success" id="start-bot">启动机器人</button>
@@ -55,9 +57,29 @@
                                 <input type="text" class="form-control" id="self-user-id">
                             </div>
                             <div class="mb-3">
+                                <label for="message-count" class="form-label">导入的最近消息数量</label>
+                                <input type="number" class="form-control" id="message-count" min="1">
+                            </div>
+                            <div class="mb-3">
                                 <label for="ran-rep-probability" class="form-label">随机回复概率(%)</label>
                                 <input type="range" class="form-range" id="ran-rep-probability" min="0" max="100">
                                 <span id="ran-rep-value">50%</span>
+                            </div>
+                            <div class="mb-3">
+                                <label for="history-timeout" class="form-label">遗忘时间(秒)</label>
+                                <input type="number" class="form-control" id="history-timeout" min="0">
+                            </div>
+                            <div class="mb-3">
+                                <label for="current-prompt" class="form-label">当前提示词</label>
+                                <select class="form-select" id="current-prompt">
+                                    <!-- 这里将由JavaScript根据PROMPT数组动态填充 -->
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="current-completion" class="form-label">当前LLM</label>
+                                <select class="form-select" id="current-completion">
+                                    <!-- 这里将由JavaScript根据LLM对象动态填充 -->
+                                </select>
                             </div>
                             <button type="submit" class="btn btn-primary">保存配置</button>
                         </form>
@@ -67,8 +89,36 @@
         </div>
 
         <div class="row">
+            <!-- 群聊白名单管理 -->
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <div class="card-header bg-warning text-dark">
+                        <h5 class="mb-0">群聊白名单</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <input type="number" class="form-control" id="new-group-id" placeholder="输入群号">
+                            <button class="btn btn-primary mt-2" id="add-group">添加群聊</button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table" id="groups-table">
+                                <thead>
+                                    <tr>
+                                        <th>群号</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- 这里将由JavaScript填充 -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- 记忆管理 -->
-            <div class="col-md-12 mb-4">
+            <div class="col-md-6 mb-4">
                 <div class="card">
                     <div class="card-header bg-success text-white">
                         <h5 class="mb-0">记忆系统</h5>
@@ -117,3 +167,4 @@
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>
+```

@@ -1,11 +1,22 @@
 import random
-from config import *
+import config
 from .function_completion import *
 from .function_memory import *
+import importlib
+import signal
+
+def reload_config(signum, frame):
+    """信号处理函数，重新加载配置"""
+
+    print("⏱️正在重新加载配置...")
+    # 重新加载配置模块
+    importlib.reload(config)
+
+    print(f"✅配置已重新加载")
 
 # 随机文字池子
 def ran_rep_text_only():
-    return random.choice(POKE)
+    return random.choice(config.POKE)
 
 # 戳一戳固定文字响应
 def build_params_text_only(event, content):
@@ -16,26 +27,28 @@ def build_params_text_only(event, content):
 
 # 随机回复
 def ran_rep():
-    return random.randint(1,100) <= RAN_REP_PROBABILITY
+    return random.randint(1,100) <= config.RAN_REP_PROBABILITY
 
 # @回复
 def be_atted(event):
     message = event.get("message")
     for log in message:
-        if log["type"] == "at" and log["data"]["qq"] == str(SELF_USER_ID):
+        if log["type"] == "at" and log["data"]["qq"] == str(config.SELF_USER_ID):
             return True
     return False
 
 # 条件回复(随机回复，被@，管理员发言，私聊)
 def rep(event):
+    if event.get("message_type") == "group" and event.get("group_id") not in config.ALLOWED_GROUPS:
+        return False
     return ran_rep() or be_atted(event) or event.get("message_type") == "private"
 
 # 表情随机器
 def ran_emoji():
-    return random.randint(1,100) <= RAN_EMOJI_PROBABILITY
+    return random.randint(1,100) <= config.RAN_EMOJI_PROBABILITY
 
 def ran_emoji_content(event):
-    return build_params("image", event, random.choice(EMOJI_POOL))
+    return build_params("image", event, random.choice(config.EMOJI_POOL))
 
 # 日志输出
 def out(tip, content):
@@ -60,28 +73,28 @@ async def get_nearby_message(websocket, event, llm):
         data = json.loads(response)
         res = []
         if data.get("status") == "ok":
-            messages = data.get("data").get("messages")[-MESSAGE_COUNT:]
+            messages = data.get("data").get("messages")[-config.MESSAGE_COUNT:]
             for log1 in messages:
                 message = log1.get("message")
                 nickname = log1.get("sender").get("nickname")
                 temp_msg = ""
-                if log1.get("user_id") != SELF_USER_ID:
+                if log1.get("user_id") != config.SELF_USER_ID:
                     temp_msg = nickname + ":"
                 for log2 in message:
                     if log2["type"] == "text" and log2["data"]["text"] != "":
                         temp_msg += log2["data"]["text"]
                     elif log2["type"] == "at":
                         target_prompt = ""
-                        if int(log2.get("data").get("qq")) == SELF_USER_ID:
+                        if int(log2.get("data").get("qq")) == config.SELF_USER_ID:
                             target_prompt = "(系统提示:对方想和你说话)"
                         else:
                             target_prompt = "(系统提示:对方在和其他人说话)"
                         temp_msg +=  target_prompt
-                    elif log2["type"] == "image" and llm == LLM["AIZEX"] and log1.get("user_id") != SELF_USER_ID:
+                    elif log2["type"] == "image" and llm == config.LLM["AIZEX"] and log1.get("user_id") != config.SELF_USER_ID:
                         image_base64 = url_to_base64(log2["data"]["url"])
                         res.append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}]})
                 if temp_msg != nickname + ":" and temp_msg != "":
-                    if log1.get("user_id") != SELF_USER_ID:
+                    if log1.get("user_id") != config.SELF_USER_ID:
                         res.append({"role": "user", "content": [{"type": "text", "text": temp_msg}]})
                     else:
                         res.append({"role": "assistant", "content": temp_msg})
@@ -91,17 +104,17 @@ async def get_nearby_message(websocket, event, llm):
             print("⚠️ 获取群聊消息时发生错误:", str(e))
 
 
-# 控制台
+# 控制台(web 接口)
 # /send 群聊/私聊 群号
 def special_event(event):
-    if event.get("message_type") == "group" or event.get("user_id") != TARGET_USER_ID:
+    if event.get("message_type") == "group" or event.get("user_id") != config.TARGET_USER_ID:
         return False
     try:
         cmd = event.get("message")[0]["data"]["text"]
-        if cmd.startswith(CMD_PREFIX):
+        if cmd.startswith(config.CMD_PREFIX):
             parts = cmd.split(" ", 2)
 
-            if len(parts) == 3 and parts[2] in ALLOWED_GROUPS:
+            if len(parts) == 3 and parts[2] in config.ALLOWED_GROUPS:
 
                 target_type = parts[1]
                 target_id = parts[2]
