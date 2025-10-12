@@ -198,12 +198,12 @@ async def qq_bot():
                 if special_event(event):
                     my_event = special_event(event)
 
-                    # 如果 special_event 返回了 "message"，直接发，且不走大模型
+                    # /s img/图片
                     if isinstance(my_event, dict) and my_event.get("message"):
                         await send_message(ws, my_event)
-                        continue  # 本条消息处理完毕
+                        continue
 
-                    # 走大模型回复文本
+                    # /s 群聊|私聊 <ID>
                     current_id = my_event["group_id"] if my_event["message_type"] == "group" else my_event["user_id"]
                     if current_id not in handle_pool:
                         handle_pool[current_id] = template_ask_messages.copy()
