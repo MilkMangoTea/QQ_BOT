@@ -1,7 +1,7 @@
 import random
 import config
-from .function_completion import *
-from .function_memory import *
+from core.function_completion import *
+from core.function_memory import *
 import importlib
 import signal
 

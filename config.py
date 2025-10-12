@@ -44,7 +44,7 @@ POKE = [
     "114514喵~"
 ]
 
-CURRENT_PROMPT = 0
+CURRENT_PROMPT = 2
 
 # 提示词
 PROMPT = [

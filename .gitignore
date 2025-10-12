@@ -4,4 +4,8 @@ NapCatInstaller.app
 requirements
 __pycache__
 .idea
-memory_store.json
+
+*.json
+*.sh
+*.json
+*.pyc
