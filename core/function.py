@@ -2,6 +2,7 @@ import random
 import config
 from core.function_completion import *
 from core.function_memory import *
+from core.function_cmd import *
 import importlib
 import signal
 
@@ -102,39 +103,6 @@ async def get_nearby_message(websocket, event, llm):
 
     except Exception as e:
             print("⚠️ 获取群聊消息时发生错误:", str(e))
-
-
-# 控制台(web 接口)
-# /send 群聊/私聊 群号
-def special_event(event):
-    if event.get("message_type") == "group" or event.get("user_id") != config.TARGET_USER_ID:
-        return False
-    try:
-        cmd = event.get("message")[0]["data"]["text"]
-        if cmd.startswith(config.CMD_PREFIX):
-            parts = cmd.split(" ", 2)
-
-            if len(parts) == 3 and parts[2] in config.ALLOWED_GROUPS:
-
-                target_type = parts[1]
-                target_id = parts[2]
-
-                if target_type == "群聊":
-                    print(f"💬 正在向群 {target_id} 发送消息")
-                    return {"group_id": target_id, "message_type": "group"}
-
-                elif target_type == "私聊":
-                    print(f"💬 正在向用户 {target_id} 发送消息")
-                    return {"user_id": target_id, "message_type": "private"}
-
-            print("⚠️ 格式错误或不合法的群聊")
-            return None
-        else:
-            return False
-
-    except Exception as e:
-        print(f"❗ 控制台事件处理失败: {e}")
-        return None
 
 # 处理 json 格式的回复
 def solve_json(response):
