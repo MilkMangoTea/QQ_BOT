@@ -197,7 +197,6 @@ async def qq_bot():
 
                 my_event = special_event(event)
                 if my_event:
-                    my_event = special_event(event)
 
                     # /s img/图片
                     if isinstance(my_event, dict) and my_event.get("message"):
