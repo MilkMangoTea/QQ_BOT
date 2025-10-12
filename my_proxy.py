@@ -195,7 +195,8 @@ async def qq_bot():
                 if event.get("post_type") != "message":
                     continue
 
-                if special_event(event):
+                my_event = special_event(event)
+                if my_event:
                     my_event = special_event(event)
 
                     # /s img/图片

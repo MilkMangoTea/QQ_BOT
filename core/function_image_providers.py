@@ -131,6 +131,7 @@ def fetch_acg_one(tags, prefer=("danbooru","yandere","gelbooru","lolicon"), r18=
 
     for src in prefer:
         try:
+            print(f"尝试从 {src} 取图...")
             if src == "danbooru":
                 url = fetch_danbooru_one(tags, rating=dan_rating)
             elif src == "yandere":
@@ -144,5 +145,6 @@ def fetch_acg_one(tags, prefer=("danbooru","yandere","gelbooru","lolicon"), r18=
             if url:
                 return url, src
         except Exception:
+            print(f"⚠️ 从 {src} 取图失败")
             continue
     return None, None

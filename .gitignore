@@ -4,6 +4,7 @@ NapCatInstaller.app
 requirements
 __pycache__
 .idea
+.venv
 
 *.json
 *.sh
