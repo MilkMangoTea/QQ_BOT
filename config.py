@@ -1,5 +1,7 @@
+from dotenv import load_dotenv
 import os
 
+load_dotenv(dotenv_path="/opt/QQ_BOT/my_env/api_key.env")  # 指定绝对路径
 # 配置参数
 
 # 导入的最近消息数量(这个数量至少为1,否则不引入最新内容)
@@ -9,7 +11,7 @@ MESSAGE_COUNT = 10
 TARGET_USER_ID = int(os.environ.get("MY_QQ_ID"))
 
 # 根据实际配置修改
-WEBSOCKET_URI = "ws://127.0.0.1:8000"
+WEBSOCKET_URI = "ws://127.0.0.1:3001/?access_token=qwert"
 
 # 机器人QQ号
 SELF_USER_ID = int(os.environ.get("BOT_QQ_ID"))
@@ -128,7 +130,7 @@ PROMPT = [
 ]
 
 # llm state
-CURRENT_COMPLETION = "DEEPSEEK-V3"
+CURRENT_COMPLETION = "AIZEX"
 
 LLM = {
     "DEEPSEEK-V3": {
