@@ -1,4 +1,5 @@
 import config
+from core.function_image_providers import *
 
 def special_event(event):
     """
@@ -29,7 +30,6 @@ def special_event(event):
 
                 # 拉图（R-18 你已说明不是问题，这里默认 True；需要变更可以加判断）
                 try:
-                    from function_image_provider import fetch_acg_one
                     url, src = fetch_acg_one(tags=tags, r18=True)
                 except Exception as e:
                     url, src = None, None

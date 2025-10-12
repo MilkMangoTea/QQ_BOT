@@ -162,7 +162,7 @@ LLM = {
     "AIZEX": {
         "KEY": os.getenv("AIZEX"),
         "URL": "https://a1.aizex.me/v1",
-        "NAME": "o4-mini-all"
+        "NAME": "gpt-4.1-mini"
     }
 }
 
