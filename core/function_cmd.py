@@ -88,7 +88,18 @@ def special_event(event):
                 ]
             else:
                 route["message"] = [{"type":"text","data":{"text":"没找到符合标签的图片 :("}}]
-            print(f"----------\n{"图片请求结果"}\n{route["message"]["data"]["text"]}\n----------")
+                
+            # 输出预览
+            try:
+                preview = ""
+                if isinstance(route["message"], list) and route["message"]:
+                    first = route["message"][0]
+                    if first.get("type") == "text":
+                        preview = (first.get("data") or {}).get("text", "")
+                print("----------\n图片请求结果\n" + preview + "\n----------")
+            except Exception:
+                pass
+
             return route  # 含 message：主循环直接发送，跳过大模型
 
         # ---------- 控制台路由子命令 ----------
