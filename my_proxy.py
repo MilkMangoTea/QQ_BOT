@@ -98,6 +98,7 @@ async def remember(websocket ,event):
             current_id = event["group_id"]
         elif msg_type == "private":
             current_id = event["user_id"]
+        current_id = str(current_id)
 
         # 遗忘策略
         if current_id not in handle_pool or time.time() - last_update_time.get(current_id, 0) > config.HISTORY_TIMEOUT:
