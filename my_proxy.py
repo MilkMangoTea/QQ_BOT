@@ -136,7 +136,7 @@ async def remember(websocket ,event):
         update_status(connections=handle_pool)
 
     except KeyError as e:
-        print(f"⚠️ 缺少必要字段: {e}")
+        print(f"⚠️ [remember]缺少必要字段: {e}")
 
 
 
@@ -175,7 +175,7 @@ async def handle_message(websocket, event):
         update_status(connections=handle_pool)
 
     except KeyError as e:
-        print(f"⚠️ 缺少必要字段: {e}")
+        print(f"⚠️ [handle_message]缺少必要字段: {e}")
 
 async def qq_bot():
     """主连接函数"""
