@@ -121,8 +121,8 @@ async def remember(websocket ,event):
                 if CURRENT_LLM != config.LLM["AIZEX"]:
                     out("🛑 识图功能已关闭",404)
                     continue
-                image_base64 = url_to_base64(log["data"]["url"])
-                handle_pool[current_id].append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}]})
+                img_msg = build_image_message_chat_auto(log["data"]["url"], detail="auto")
+                handle_pool[current_id].append(img_msg)
                 out("✅ 新输入:", "[图片]")
 
         if temp_msg != nickname + ":":

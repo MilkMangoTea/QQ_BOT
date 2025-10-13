@@ -92,8 +92,8 @@ async def get_nearby_message(websocket, event, llm):
                             target_prompt = "(系统提示:对方在和其他人说话)"
                         temp_msg +=  target_prompt
                     elif log2["type"] == "image" and llm == config.LLM["AIZEX"] and log1.get("user_id") != config.SELF_USER_ID:
-                        image_base64 = url_to_base64(log2["data"]["url"])
-                        res.append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}]})
+                        img_msg = build_image_message_chat_auto(log2["data"]["url"], detail="auto")
+                        res.append(img_msg)
                 if temp_msg != nickname + ":" and temp_msg != "":
                     if log1.get("user_id") != config.SELF_USER_ID:
                         res.append({"role": "user", "content": [{"type": "text", "text": temp_msg}]})

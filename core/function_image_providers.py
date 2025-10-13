@@ -2,6 +2,44 @@ import os
 import random
 import datetime
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# ========== Proxy & Session ==========
+PROXY_URL = os.environ.get("ACG_PROXY", "http://127.0.0.1:7890")
+DEFAULT_TIMEOUT = 12  # 统一超时
+
+def _build_session(proxy_url=PROXY_URL, timeout=DEFAULT_TIMEOUT):
+    s = requests.Session()
+    # 统一代理
+    if proxy_url:
+        s.proxies.update({
+            "http": proxy_url,
+            "https": proxy_url,
+        })
+    # 统一 UA
+    s.headers.update({"User-Agent": "acg-fetcher/1.0"})
+    # 失败重试（对网络波动更稳）
+    retry = Retry(
+        total=3,
+        backoff_factor=0.6,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods={"GET", "HEAD", "OPTIONS"},
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("http://", adapter)
+    s.mount("https://", adapter)
+
+    # 包一层默认 timeout
+    _request = s.request
+    def _request_with_timeout(method, url, **kwargs):
+        kwargs.setdefault("timeout", timeout)
+        return _request(method, url, **kwargs)
+    s.request = _request_with_timeout
+    return s
+
+SESSION = _build_session()
 
 # ---------- Utils ----------
 def _rand_pick(items):
@@ -22,14 +60,12 @@ def fetch_danbooru_one(tags, recent_days=14, rating="e"):
     qtags = list(tags)
     if rating:
         qtags.append(f"rating:{rating}")
-    # 只取最近 n 天，保证“新”
     qtags.append(f"date:>={_days_ago(recent_days)}")
-    # 拿一批最新，再本地随机
     params = {
         "tags": " ".join(qtags + ["order:id_desc"]),
         "limit": 100
     }
-    r = requests.get(DANBASE, params=params, timeout=12)
+    r = SESSION.get(DANBASE, params=params)
     r.raise_for_status()
     posts = r.json()
     if not posts:
@@ -55,7 +91,7 @@ def fetch_yandere_one(tags, recent_days=14, rating="e"):
         "limit": 100,         # 拿一批
         "page": 1             # id_desc 默认最新
     }
-    r = requests.get(YANBASE, params=params, timeout=12)
+    r = SESSION.get(YANBASE, params=params)
     r.raise_for_status()
     posts = r.json()
     if not posts:
@@ -76,7 +112,6 @@ def fetch_gelbooru_one(tags, recent_days=14, rating="explicit"):
     qtags = list(tags)
     if rating:
         qtags.append(f"rating:{rating}")
-    # Gelbooru 不支持直接 date:>= ，用索引顺序取最近（pid=0, 减少limit后本地随机）
     params = {
         "page": "dapi",
         "s": "post",
@@ -85,9 +120,12 @@ def fetch_gelbooru_one(tags, recent_days=14, rating="explicit"):
         "limit": 100,
         "tags": " ".join(qtags) + " sort:date:desc"
     }
-    r = requests.get(GELBASE, params=params, timeout=12, headers={"User-Agent":"qq-bot/1.0"})
-    r.raise_for_status()
-    posts = r.json() if r.headers.get("Content-Type","").startswith("application/json") else []
+    r = SESSION.get(GELBASE, params=params, headers={"User-Agent": "qq-bot/1.0"})
+    # ↑ 已有全局 UA，这里保留原实现；也可省略此 headers
+    if r.headers.get("Content-Type", "").startswith("application/json"):
+        posts = r.json()
+    else:
+        posts = []
     if not posts:
         return None
     pick = _rand_pick(posts)
@@ -110,7 +148,7 @@ def fetch_lolicon_one(tags, r18=True, exclude_ai=False):
         params["tag"] = tags  # 支持列表
     if exclude_ai:
         params["excludeAI"] = True
-    r = requests.get(LOLI, params=params, timeout=12)
+    r = SESSION.get(LOLI, params=params)
     r.raise_for_status()
     data = r.json().get("data", [])
     if not data:
@@ -144,7 +182,7 @@ def fetch_acg_one(tags, prefer=("danbooru","yandere","gelbooru","lolicon"), r18=
                 continue
             if url:
                 return url, src
-        except Exception:
-            print(f"⚠️ 从 {src} 取图失败")
+        except Exception as e:
+            print(f"⚠️ 从 {src} 取图失败: {e}")
             continue
     return None, None
