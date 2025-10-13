@@ -155,7 +155,8 @@ async def handle_message(websocket, event):
         # 发送请求
         content = ai_completion(handle_pool[current_id], current_id)
 
-        handle_pool[current_id].append({"role": "assistant", "content": content})
+        if content:
+            handle_pool[current_id].append({"role": "assistant", "content": content})
         out("🏁 历史会话:", handle_pool[current_id])
 
         # 构造并发送API请求
