@@ -8,7 +8,7 @@ def build_params(type, event, content):
     base = ""
     if type == "text":
         if not content:
-            content = "ioi"
+            content = "嗯"
         base = {"message": [{"type": "text", "data": {"text": content}}]}
     elif type == "image":
         base = {"message": [{"type": "image", "data": {"file": content, "sub_type": 1, "summary": "[色禽图片]"}}]}

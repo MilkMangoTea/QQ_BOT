@@ -94,7 +94,7 @@ async def get_nearby_message(websocket, event, llm):
                     elif log2["type"] == "image" and llm == config.LLM["AIZEX"] and log1.get("user_id") != config.SELF_USER_ID:
                         image_base64 = url_to_base64(log2["data"]["url"])
                         if image_base64:
-                            res[current_id].append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}]})
+                            res[current_id].append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": image_base64}}]})
                             out("✅ 新输入:", "[图片]")
                         else:
                             res[current_id].append({"role": "user", "content": [{"type": "text", "text": "(系统提示: 图片获取失败)"}]})

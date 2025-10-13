@@ -5,7 +5,7 @@ load_dotenv(dotenv_path="/opt/QQ_BOT/my_env/api_key.env")  # 指定绝对路径
 # 配置参数
 
 # 导入的最近消息数量(这个数量至少为1,否则不引入最新内容)
-MESSAGE_COUNT = 10
+MESSAGE_COUNT = 5
 
 # 需要监听的目标用户QQ号
 TARGET_USER_ID = int(os.environ.get("MY_QQ_ID"))
