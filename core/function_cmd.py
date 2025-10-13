@@ -1,6 +1,32 @@
 import config
 from core.function_image_providers import *
 
+def _extract_cmd_text_from_event(msg_list, prefix="/s"):
+    """
+    从所有 text 段拼接后的文本里，找到第一次出现 prefix 的位置，并截断返回
+    例："...(系统提示)... /s img gawr_gura" -> "/s img gawr_gura"
+    """
+    if not isinstance(msg_list, list):
+        return None
+
+    # 拼所有 text 段（忽略 at/image 等）
+    texts = []
+    for seg in msg_list:
+        if seg.get("type") == "text":
+            texts.append((seg.get("data") or {}).get("text", ""))
+
+    full = " ".join(texts).strip()
+    if not full:
+        return None
+
+    idx = full.find(prefix)
+    if idx == -1:
+        return None
+
+    # 从第一个 /s 开始截断
+    cmd_text = full[idx:].strip()
+    return cmd_text or None
+
 def special_event(event):
     """
     仅 /s 开头被当作命令，其他一律当普通消息
@@ -18,10 +44,9 @@ def special_event(event):
         if not (isinstance(msg_list, list) and msg_list and msg_list[0].get("type") == "text"):
             return False
 
-        cmd_text = (msg_list[0].get("data") or {}).get("text", "").strip()
-
+        cmd_text = _extract_cmd_text_from_event(msg_list, prefix=config.CMD_PREFIX)
         # 仅 /s 前缀视为命令；否则直接返回 False
-        if not cmd_text.startswith(config.CMD_PREFIX):
+        if not cmd_text:
             return False
 
         # 统一 route（回到消息来源会话）
