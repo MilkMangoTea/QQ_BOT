@@ -1,4 +1,5 @@
 import asyncio
+import httpx
 import websockets
 import time
 from core.function import *
@@ -9,10 +10,22 @@ import os
 STATUS_FILE = os.path.join(os.path.dirname(__file__), "data", "bot_status.json")
 os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
 
-CURRENT_LLM = config.LLM[config.CURRENT_COMPLETION]
-LLM_NAME = CURRENT_LLM["NAME"]
+HTTPX_LIMITS  = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=60.0)
+HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
+HTTP_CLIENT   = httpx.Client(limits=HTTPX_LIMITS, timeout=HTTPX_TIMEOUT, http2=True)
+
+CURRENT_LLM  = config.LLM[config.CURRENT_COMPLETION]
+LLM_NAME     = CURRENT_LLM["NAME"]
 LLM_BASE_URL = CURRENT_LLM["URL"]
-LLM_KEY = CURRENT_LLM["KEY"]
+LLM_KEY      = CURRENT_LLM["KEY"]
+
+client = OpenAI(
+    api_key=LLM_KEY,
+    base_url=LLM_BASE_URL,
+    timeout=40.0,     # 默认超时（可被请求级覆盖）
+    max_retries=2,    # SDK级重试
+    http_client=HTTP_CLIENT,  # 连接池/Keep-Alive
+)
 
 template_ask_messages = [{"role": "system", "content": [{"type": "text", "text": config.PROMPT[0] + config.PROMPT[config.CURRENT_PROMPT]}]}]
 handle_pool = {}
@@ -40,12 +53,6 @@ def update_status(status="online", connections=None):
 # 大模型请求器(注意message不能为空，deepseek的assistant里面不能有text!)
 def ai_completion(message, current_id):
     try:
-        global CURRENT_LLM, LLM_NAME, LLM_BASE_URL, LLM_KEY
-        CURRENT_LLM = config.LLM[config.CURRENT_COMPLETION]
-        LLM_NAME = CURRENT_LLM["NAME"]
-        LLM_BASE_URL = CURRENT_LLM["URL"]
-        LLM_KEY = CURRENT_LLM["KEY"]
-        client = OpenAI(api_key=LLM_KEY, base_url=LLM_BASE_URL)
 
         memory_pool = LocalDictStore()
         new_message = message + dic_to_prompt_list(memory_pool.get(str(current_id)))
