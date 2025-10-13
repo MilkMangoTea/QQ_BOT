@@ -100,7 +100,7 @@ async def remember(websocket ,event):
             current_id = event["user_id"]
 
         # 遗忘策略
-        if current_id not in handle_pool or time.time() - last_update_time[current_id] > config.HISTORY_TIMEOUT:
+        if current_id not in handle_pool or time.time() - last_update_time.get(current_id, 0) > config.HISTORY_TIMEOUT:
             handle_pool[current_id] = template_ask_messages.copy()
             handle_pool[current_id].extend(await get_nearby_message(websocket, event, CURRENT_LLM))
             last_update_time[current_id] = time.time()
@@ -150,6 +150,8 @@ async def handle_message(websocket, event):
             current_id = event["group_id"]
         elif msg_type == "private":
             current_id = event["user_id"]
+        current_id = str(current_id)
+
         out("⏳ 当前对话对象:", current_id)
 
         # 发送请求
