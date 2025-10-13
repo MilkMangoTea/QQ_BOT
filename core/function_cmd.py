@@ -41,8 +41,6 @@ def special_event(event):
     """
     try:
         msg_list = event.get("message")
-        if not (isinstance(msg_list, list) and msg_list and msg_list[0].get("type") == "text"):
-            return False
 
         cmd_text = _extract_cmd_text_from_event(msg_list, prefix=config.CMD_PREFIX)
         # 仅 /s 前缀视为命令；否则直接返回 False
