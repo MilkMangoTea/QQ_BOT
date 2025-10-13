@@ -122,8 +122,11 @@ async def remember(websocket ,event):
                     out("🛑 识图功能已关闭",404)
                     continue
                 image_base64 = url_to_base64(log["data"]["url"])
-                handle_pool[current_id].append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}]})
-                out("✅ 新输入:", "[图片]")
+                if image_base64:
+                    handle_pool[current_id].append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}]})
+                    out("✅ 新输入:", "[图片]")
+                else:
+                    handle_pool[current_id].append({"role": "user", "content": [{"type": "text", "text": "(系统提示: 图片获取失败)"}]})
 
         if temp_msg != nickname + ":":
             handle_pool[current_id].append({"role": "user", "content": [{"type": "text", "text": temp_msg}]})
