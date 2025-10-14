@@ -88,7 +88,7 @@ def special_event(event):
                 ]
             else:
                 route["message"] = [{"type":"text","data":{"text":"没找到符合标签的图片 :("}}]
-                
+
             # 输出预览
             try:
                 preview = ""
