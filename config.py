@@ -17,7 +17,7 @@ WEBSOCKET_URI = "ws://127.0.0.1:3001/?access_token=qwert"
 SELF_USER_ID = int(os.environ.get("BOT_QQ_ID"))
 
 # 随机回复概率
-RAN_REP_PROBABILITY = 0
+RAN_REP_PROBABILITY = 20
 
 # 回复表情包概率
 RAN_EMOJI_PROBABILITY = 80
