@@ -247,12 +247,14 @@ if __name__ == "__main__":
 
             asyncio.get_event_loop().run_until_complete(qq_bot())
 
-        except websockets.ConnectionClosed:
+
+        except (websockets.ConnectionClosed, OSError, ConnectionRefusedError, TimeoutError, websockets.InvalidURI,websockets.InvalidHandshake, websockets.WebSocketException):
 
             # 更新断开连接状态
             update_status("disconnected")
 
             print("⏱️ 连接断开，尝试重连...")
+            time.sleep(3)
             continue
 
         except KeyboardInterrupt:
