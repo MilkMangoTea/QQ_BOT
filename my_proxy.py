@@ -56,18 +56,41 @@ def ai_completion(message, current_id):
 
         memory_pool = LocalDictStore()
         new_message = message + dic_to_prompt_list(memory_pool.get(str(current_id)))
-        response = client.chat.completions.create(
-            model = LLM_NAME,
-            messages = new_message
-        )
-        out("原始信息：", response.choices[0].message.content)
-        content, memory_dict = solve_json(response.choices[0].message.content)
-        memory(memory_dict, current_id, memory_pool)
 
-        # 更新状态
+        # 将 LLM_NAME 视为逗号分隔的候选模型序列：先依次试这些模型，再兜底 DeepSeek
+        names = [s.strip() for s in str(LLM_NAME).split(",") if s.strip()]
+        cands = [(name, LLM_BASE_URL, LLM_KEY) for name in names]
+
+        # 兜底：DeepSeek-V3（若当前就已是 DeepSeek 则不会多加）
+        dsv3 = config.LLM["DEEPSEEK-V3"]
+        if not (LLM_BASE_URL == dsv3["URL"] and LLM_KEY == dsv3["KEY"] and any(n == dsv3["NAME"] for n in names)):
+            cands.append((dsv3["NAME"], dsv3["URL"], dsv3["KEY"]))
+
+        last_err = None
+        for name, url, key in cands:
+            try:
+                # 复用默认 client（相同 base_url/key），否则临时建一个
+                cli = client if (url == LLM_BASE_URL and key == LLM_KEY) else OpenAI(
+                    api_key=key, base_url=url, timeout=40.0, max_retries=2, http_client=HTTP_CLIENT
+                )
+                resp = cli.chat.completions.create(model=name, messages=new_message)
+
+                out("原始信息：", resp.choices[0].message.content)
+                content, memory_dict = solve_json(resp.choices[0].message.content)
+                memory(memory_dict, current_id, memory_pool)
+
+                # 更新状态
+                update_status(connections=handle_pool)
+
+                return content
+
+            except Exception as e:
+                last_err = e
+                continue
+
+        print(f"⚠️ 调用 OpenAI API 发生错误(全部候选失败): {last_err}")
         update_status(connections=handle_pool)
-
-        return content
+        return None
 
     except Exception as e:
         # 捕获异常并打印错误信息
