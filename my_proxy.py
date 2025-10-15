@@ -10,8 +10,8 @@ import os
 STATUS_FILE = os.path.join(os.path.dirname(__file__), "data", "bot_status.json")
 os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
 
-HTTPX_LIMITS  = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=60.0)
-HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
+HTTPX_LIMITS  = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=20.0)
+HTTPX_TIMEOUT = httpx.Timeout(connect=5.0, read=12.0, write=5.0, pool=5.0)
 HTTP_CLIENT   = httpx.Client(limits=HTTPX_LIMITS, timeout=HTTPX_TIMEOUT, http2=True)
 
 CURRENT_LLM  = config.LLM[config.CURRENT_COMPLETION]
@@ -22,9 +22,9 @@ LLM_KEY      = CURRENT_LLM["KEY"]
 client = OpenAI(
     api_key=LLM_KEY,
     base_url=LLM_BASE_URL,
-    timeout=40.0,     # 默认超时（可被请求级覆盖）
-    max_retries=2,    # SDK级重试
-    http_client=HTTP_CLIENT,  # 连接池/Keep-Alive
+    timeout=15.0,     # 快失败：整体 15 秒超时
+    max_retries=0,    # 不做 SDK 重试
+    http_client=HTTP_CLIENT,
 )
 
 template_ask_messages = [{"role": "system", "content": [{"type": "text", "text": config.PROMPT[0] + config.PROMPT[config.CURRENT_PROMPT]}]}]
@@ -74,8 +74,8 @@ def ai_completion(message, current_id):
                     api_key=key, base_url=url, timeout=40.0, max_retries=2, http_client=HTTP_CLIENT
                 )
                 resp = cli.chat.completions.create(model=name, messages=new_message)
-
                 out("原始信息：", resp.choices[0].message.content)
+                print(f"✅ 使用模型: {name}")
                 content, memory_dict = solve_json(resp.choices[0].message.content)
                 memory(memory_dict, current_id, memory_pool)
 
