@@ -11,7 +11,7 @@ MESSAGE_COUNT = 10
 TARGET_USER_ID = int(os.environ.get("MY_QQ_ID"))
 
 # 根据实际配置修改
-WEBSOCKET_URI = "ws://127.0.0.1:3001/?accpess_token=qwert"
+WEBSOCKET_URI = "ws://127.0.0.1:3001/?access_token=qwert"
 
 # 机器人QQ号
 SELF_USER_ID = int(os.environ.get("BOT_QQ_ID"))
