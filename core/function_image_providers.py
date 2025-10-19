@@ -157,12 +157,81 @@ def fetch_lolicon_one(tags, r18=True, exclude_ai=False):
     urls = it.get("urls") or {}
     return urls.get("original") or urls.get("regular") or urls.get("small")
 
+# ---------- Pixiv (App-API via pixivpy) ----------
+# pip install pixivpy
+def _build_pixiv_appapi_client():
+    try:
+        from pixivpy3 import AppPixivAPI
+    except ImportError:
+        return None, "pixivpy not installed"
+    refresh_token = os.environ.get("PIXIV_REFRESH_TOKEN")
+    if not refresh_token:
+        return None, "PIXIV_REFRESH_TOKEN missing"
+    api = AppPixivAPI(proxies={"http": PROXY_URL, "https": PROXY_URL} if PROXY_URL else None, timeout=DEFAULT_TIMEOUT)
+    api.auth(refresh_token=refresh_token)
+    return api, None
+
+def fetch_pixiv_one(tags, recent_days=14, r18=True, exclude_ai=False):
+    """
+    Pixiv App-API 搜索：按时间倒序抓一批再随机；返回原图 url
+    """
+    api, err = _build_pixiv_appapi_client()
+    if not api:
+        raise RuntimeError(f"Pixiv App-API unavailable: {err}")
+
+    # 搜索词：Pixiv 支持空格分隔 OR/AND，简单起见直接空格 join
+    word = " ".join(tags) if tags else ""
+    search_target = "partial_match_for_tags"   # 更宽松的标签匹配
+    sort = "date_desc"
+    # R-18：App-API 用 "search_illust" + word中可含 r-18 标签；后续再二次过滤 x_restrict
+    json_result = api.search_illust(word, search_target=search_target, sort=sort)
+    illusts = (json_result.illusts or []) if json_result else []
+    if not illusts:
+        return None
+
+    # 过滤：时间、R18、AI
+    cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=recent_days)
+    def _ok(it):
+        # x_restrict: 0=safe, 1=R18, 2=R18G
+        xr = getattr(it, "x_restrict", 0)
+        if r18:
+            if xr not in (1, 2):
+                return False
+        else:
+            if xr != 0:
+                return False
+        if exclude_ai:
+            # App-API: illust.ai_type: 0=Not AI, 2=AI
+            if getattr(it, "ai_type", 0) == 2:
+                return False
+        # 时间
+        create_date = getattr(it, "create_date", None)
+        try:
+            dt = datetime.datetime.fromisoformat(create_date.replace("Z","+00:00")).replace(tzinfo=None)
+            if dt < cutoff:
+                return False
+        except Exception:
+            pass
+        return True
+
+    cand = [it for it in illusts if _ok(it)]
+    if not cand:
+        return None
+    pick = _rand_pick(cand)
+    # 原图：在 meta_single_page 或 meta_pages 中
+    url = None
+    if getattr(pick, "meta_single_page", None) and pick.meta_single_page.get("original_image_url"):
+        url = pick.meta_single_page["original_image_url"]
+    elif getattr(pick, "meta_pages", None):
+        pages = pick.meta_pages
+        if pages:
+            url = pages[0]["image_urls"].get("original") or pages[0]["image_urls"].get("large")
+    if not url and getattr(pick, "image_urls", None):
+        url = pick.image_urls.get("large") or pick.image_urls.get("medium")
+    return url
+
 # ---------- Unified entry ----------
-def fetch_acg_one(tags, prefer=("danbooru","yandere","gelbooru","lolicon"), r18=True):
-    """
-    统一入口：按优先级尝试；返回 str(url) 或 None
-    """
-    # R-18 映射
+def fetch_acg_one(tags, prefer=("pixiv","danbooru","yandere","gelbooru","lolicon"), r18=True):
     dan_rating = "e" if r18 else "s"
     yan_rating = "e" if r18 else "s"
     gel_rating = "explicit" if r18 else "safe"
@@ -176,6 +245,8 @@ def fetch_acg_one(tags, prefer=("danbooru","yandere","gelbooru","lolicon"), r18=
                 url = fetch_yandere_one(tags, rating=yan_rating)
             elif src == "gelbooru":
                 url = fetch_gelbooru_one(tags, rating=gel_rating)
+            elif src == "pixiv":
+                url = fetch_pixiv_one(tags, r18=r18)   # <- 新增
             elif src == "lolicon":
                 url = fetch_lolicon_one(tags, r18=r18)
             else:
