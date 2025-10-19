@@ -52,6 +52,7 @@ def special_event(event):
         if route["message_type"] == "group":
             route["group_id"] = event.get("group_id")
             route["message"] = [{"type": "text", "data": {"text": "⚠️ 错了喵，怕了喵，不搞了喵"}}]
+            return route
         else:
             route["user_id"] = event.get("user_id")
 
