@@ -39,7 +39,7 @@ def be_atted(event):
     return False
 
 # 条件回复(随机回复，被@，管理员发言，私聊)
-def rep(event):
+def rep(event, handle_pool):
     if event.get("message_type") == "group" and event.get("group_id") not in config.ALLOWED_GROUPS:
         return False
 
@@ -47,7 +47,7 @@ def rep(event):
         return True
 
     try:
-        return should_reply_via_zhipu(event)
+        return should_reply_via_zhipu(event, handle_pool)
     except Exception as e:
         print(f"⚠️ [rep] ZHIPU 调用异常: {e}")
         return False

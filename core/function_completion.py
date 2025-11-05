@@ -83,36 +83,62 @@ def _extract_text(event) -> str:
                 parts.append(t)
     return "".join(parts).strip()
 
-def should_reply_via_zhipu(event) -> bool:
-    """
-    用 ZHIPU 做“是否需要回复”的二分类。
-    仅在你的本地规则未命中时调用。
-    返回 True/False；异常时保守 False。
-    """
+def should_reply_via_zhipu(event, handle_pool) -> bool:
     if not (_ZHIPU_NAME and _ZHIPU_URL and _ZHIPU_KEY):
         print("400 ZHIPU 未配置，跳过判定")
         return False
 
-    text = _extract_text(event)
-    if not text:
+    curr_text = _extract_text(event)
+    if not curr_text:
         return False
 
-    msg_type = event.get("message_type")
-    gid = event.get("group_id", "")
-    uid = event.get("user_id", "")
+    take_n = 5
+    raw = list(handle_pool or [])[-take_n:]
+    ctx_lines = []
+    for s in raw:
+        # 兼容 dict/str 两种：如果是 dict，则优先取 "text"
+        if isinstance(s, dict):
+            s = s.get("text") if "text" in s else str(s)
+        s = (s or "").strip()
+        if not s:
+            continue
+
+        # 判断是否是“昵称：内容”/“昵称:内容”格式（别人说话）
+        if re.match(r'^[^：:]{1,24}[：:]', s):
+            line = s
+        else:
+            line = f"BOT: {s}"
+        if len(line) > 240:
+            line = line[:240] + "…"
+        ctx_lines.append(line)
+
+    # 上下文按时间正序
+    ctx_block = "\n".join(ctx_lines) if ctx_lines else "（无）"
 
     system_prompt = (
-        "你是一个路由器，只判断机器人是否应该回复这条消息。"
-        "只输出 JSON：{\"should_reply\": true/false}。"
-        "规则：明确提问/命令/求助/点名 -> true；与机器人无关的闲聊/复读/灌水 -> false；不确定偏 false。"
+        "你是群聊路由器，判断机器人是否应回复‘当前消息’。\n"
+        "严格只输出 JSON："
+        "{\"should_reply\": true/false, \"category\": \"DIRECT_AT|FOLLOWUP|QUESTION|COMMAND|CHITCHAT|NOISE|OTHER\", \"confidence\": 0~1}\n"
+        "判定指导：\n"
+        "A) 上下文中行首为“BOT: ”的是机器人历史发言；行首为“昵称：”或“昵称:”的是群友发言。\n"
+        "B) 如果当前消息与机器人上一轮内容强相关的追问/澄清/继续 -> true；\n"
+        "C) 明确的问题/请求/命令 -> true；\n"
+        "D) 口水、灌水、纯表情/复读、与机器人无关 -> false；\n"
+        "E) 不确定偏 false。"
     )
-    user_prompt = f"【消息】{text}\n【上下文】type={msg_type}, gid={gid}, uid={uid}\n只返回 JSON。"
+
+    user_prompt = (
+        f"【群聊最近上下文】\n{ctx_block}\n\n"
+        f"【当前消息】\n{curr_text}\n"
+        f"【元信息】type={event.get('message_type')}, gid={event.get('group_id')}, uid={event.get('user_id')}\n"
+        "只返回 JSON。"
+    )
 
     try:
         cli = OpenAI(
             api_key=_ZHIPU_KEY,
             base_url=_ZHIPU_URL,
-            timeout=15.0,      # 快失败，避免拖住事件循环
+            timeout=15.0,
             max_retries=2,
             http_client=HTTP_CLIENT,
         )
@@ -124,13 +150,20 @@ def should_reply_via_zhipu(event) -> bool:
             ],
             temperature=0,
             top_p=1,
+            timeout=15.0
         )
-        content = resp.choices[0].message.content or ""
+        content = (resp.choices[0].message.content or "").strip()
         m = re.search(r"\{[\s\S]*\}", content)
         data = json.loads(m.group(0)) if m else {}
         should = bool(data.get("should_reply", False))
-        print("ZHIPU 判定:", {"should": should, "text": text[:48]})
+        print("ZHIPU 判定:", {
+            "should": should,
+            "cat": data.get("category"),
+            "conf": data.get("confidence"),
+            "curr": curr_text[:48]
+        })
         return should
     except Exception as e:
         print(f"⚠️ ZHIPU 判定失败: {e}")
         return False
+

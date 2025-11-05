@@ -252,7 +252,7 @@ async def qq_bot():
                 else:
                     await remember(ws, event)
 
-                    if rep(event):
+                    if rep(event, handle_pool):
                         await handle_message(ws, event)
 
             except json.JSONDecodeError:
