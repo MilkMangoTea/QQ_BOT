@@ -1,6 +1,12 @@
 import base64
 import requests
 import urllib.parse
+import json
+import re
+import httpx
+from openai import OpenAI
+import config
+from core.function import out
 
 # 请求构建器
 def build_params(type, event, content):
@@ -58,3 +64,74 @@ def url_to_base64(url, timeout=(5,20)):
     except Exception as e:
         print(f"⚠️ 处理异常: {e}")
     return None
+
+# 轻量 httpx Client
+HTTPX_LIMITS  = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=20.0)
+HTTPX_TIMEOUT = httpx.Timeout(connect=5.0, read=8.0, write=5.0, pool=5.0)
+HTTP_CLIENT   = httpx.Client(limits=HTTPX_LIMITS, timeout=HTTPX_TIMEOUT, http2=True)
+
+_ZHIPU = config.LLM.get("ZHIPU", {})
+_ZHIPU_NAME = _ZHIPU.get("NAME")
+_ZHIPU_URL  = _ZHIPU.get("URL")
+_ZHIPU_KEY  = _ZHIPU.get("KEY")
+
+def _extract_text(event) -> str:
+    parts = []
+    for seg in event.get("message", []):
+        if seg.get("type") == "text":
+            t = seg.get("data", {}).get("text", "")
+            if t:
+                parts.append(t)
+    return "".join(parts).strip()
+
+def should_reply_via_zhipu(event) -> bool:
+    """
+    用 ZHIPU 做“是否需要回复”的二分类。
+    仅在你的本地规则未命中时调用。
+    返回 True/False；异常时保守 False。
+    """
+    if not (_ZHIPU_NAME and _ZHIPU_URL and _ZHIPU_KEY):
+        out("ZHIPU 未配置，跳过判定", 400)
+        return False
+
+    text = _extract_text(event)
+    if not text:
+        return False
+
+    msg_type = event.get("message_type")
+    gid = event.get("group_id", "")
+    uid = event.get("user_id", "")
+
+    system_prompt = (
+        "你是一个路由器，只判断机器人是否应该回复这条消息。"
+        "只输出 JSON：{\"should_reply\": true/false}。"
+        "规则：明确提问/命令/求助/点名 -> true；与机器人无关的闲聊/复读/灌水 -> false；不确定偏 false。"
+    )
+    user_prompt = f"【消息】{text}\n【上下文】type={msg_type}, gid={gid}, uid={uid}\n只返回 JSON。"
+
+    try:
+        cli = OpenAI(
+            api_key=_ZHIPU_KEY,
+            base_url=_ZHIPU_URL,
+            timeout=4.0,      # 快失败，避免拖住事件循环
+            max_retries=0,
+            http_client=HTTP_CLIENT,
+        )
+        resp = cli.chat.completions.create(
+            model=_ZHIPU_NAME,
+            messages=[
+                {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
+                {"role": "user",   "content": [{"type": "text", "text": user_prompt}]},
+            ],
+            temperature=0,
+            top_p=1,
+        )
+        content = resp.choices[0].message.content or ""
+        m = re.search(r"\{[\s\S]*\}", content)
+        data = json.loads(m.group(0)) if m else {}
+        should = bool(data.get("should_reply", False))
+        out("ZHIPU 判定:", {"should": should, "text": text[:48]})
+        return should
+    except Exception as e:
+        print(f"⚠️ ZHIPU 判定失败: {e}")
+        return False

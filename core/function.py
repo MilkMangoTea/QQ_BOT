@@ -42,7 +42,15 @@ def be_atted(event):
 def rep(event):
     if event.get("message_type") == "group" and event.get("group_id") not in config.ALLOWED_GROUPS:
         return False
-    return ran_rep() or be_atted(event) or event.get("message_type") == "private"
+
+    if ran_rep() or be_atted(event) or event.get("message_type") == "private":
+        return True
+
+    try:
+        return should_reply_via_zhipu(event)
+    except Exception as e:
+        print(f"⚠️ [rep] ZHIPU 调用异常: {e}")
+        return False
 
 # 表情随机器
 def ran_emoji():

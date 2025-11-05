@@ -249,13 +249,11 @@ async def qq_bot():
                     content = ai_completion(handle_pool[current_id], current_id)
                     await send_message(ws, build_params("text", my_event, content))
 
-
-                elif rep(event):
-                    await remember(ws, event)
-                    await handle_message(ws, event)
-
                 else:
                     await remember(ws, event)
+
+                    if rep(event):
+                        await handle_message(ws, event)
 
             except json.JSONDecodeError:
                 print("⚠️ 收到非JSON格式消息")

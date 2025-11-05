@@ -139,7 +139,7 @@ LLM = {
     "ZHIPU": {
         "KEY": os.getenv("ZHIPU"),
         "URL": "https://open.bigmodel.cn/api/paas/v4/",
-        "NAME": "glm-4-flash"
+        "NAME": "glm-4.5-flash"
     },
     "ALI": {
         "KEY": os.getenv("ALI"),
