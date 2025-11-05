@@ -93,26 +93,42 @@ def should_reply_via_zhipu(event, handle_pool) -> bool:
         return False
 
     take_n = 5
-    raw = list(handle_pool or [])[-take_n:]
     ctx_lines = []
-    for s in raw:
-        # 兼容 dict/str 两种：如果是 dict，则优先取 "text"
-        if isinstance(s, dict):
-            s = s.get("text") if "text" in s else str(s)
-        s = (s or "").strip()
-        if not s:
-            continue
+    if handle_pool:
+        # 取最近 N 条，按时间正序给模型
+        for item in reversed(list(handle_pool)[-take_n:]):
+            if isinstance(item, dict):
+                role = (item.get("role") or "").lower()
+                text_line = ""
+                if isinstance(item.get("content"), list):
+                    parts = []
+                    for seg in item["content"]:
+                        if isinstance(seg, dict) and seg.get("type") == "text":
+                            t = seg.get("text") or ""
+                            if t:
+                                parts.append(t)
+                    text_line = "".join(parts).strip()
+                else:
+                    text_line = (item.get("text") or "").strip()
+            else:
+                role = ""
+                text_line = str(item).strip()
 
-        # 判断是否是“昵称：内容”/“昵称:内容”格式（别人说话）
-        if re.match(r'^[^：:]{1,24}[：:]', s):
-            line = s
-        else:
-            line = f"BOT: {s}"
-        if len(line) > 240:
-            line = line[:240] + "…"
-        ctx_lines.append(line)
+            if not text_line:
+                continue
 
-    # 上下文按时间正序
+            # 根据 role 标注：user 行保留，assistant 行加 BOT
+            if role == "assistant":
+                line = f"BOT: {text_line}"
+            else:
+                line = text_line
+
+            if len(line) > 240:
+                line = line[:240] + "…"
+            ctx_lines.append(line)
+
+        ctx_lines.reverse()
+
     ctx_block = "\n".join(ctx_lines) if ctx_lines else "（无）"
 
     system_prompt = (
