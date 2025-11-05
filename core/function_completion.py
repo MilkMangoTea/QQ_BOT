@@ -66,7 +66,7 @@ def url_to_base64(url, timeout=(5,20)):
 
 # 轻量 httpx Client
 HTTPX_LIMITS  = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=20.0)
-HTTPX_TIMEOUT = httpx.Timeout(connect=5.0, read=8.0, write=5.0, pool=5.0)
+HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=10.0)
 HTTP_CLIENT   = httpx.Client(limits=HTTPX_LIMITS, timeout=HTTPX_TIMEOUT, http2=True)
 
 _ZHIPU = config.LLM.get("ZHIPU", {})
@@ -112,8 +112,8 @@ def should_reply_via_zhipu(event) -> bool:
         cli = OpenAI(
             api_key=_ZHIPU_KEY,
             base_url=_ZHIPU_URL,
-            timeout=4.0,      # 快失败，避免拖住事件循环
-            max_retries=0,
+            timeout=15.0,      # 快失败，避免拖住事件循环
+            max_retries=2,
             http_client=HTTP_CLIENT,
         )
         resp = cli.chat.completions.create(
