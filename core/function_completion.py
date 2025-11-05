@@ -83,7 +83,7 @@ def _extract_text(event) -> str:
                 parts.append(t)
     return "".join(parts).strip()
 
-def should_reply_via_zhipu(event, handle_pool) -> bool:
+def should_reply_via_zhipu(event, handle_pool_whole) -> bool:
     if not (_ZHIPU_NAME and _ZHIPU_URL and _ZHIPU_KEY):
         print("400 ZHIPU 未配置，跳过判定")
         return False
@@ -94,6 +94,9 @@ def should_reply_via_zhipu(event, handle_pool) -> bool:
 
     take_n = 5
     ctx_lines = []
+    gid = event.get("group_id")
+    handle_pool = handle_pool_whole[gid]
+
     if handle_pool:
         # 取最近 N 条，按时间正序给模型
         for item in reversed(list(handle_pool)[-take_n:]):
