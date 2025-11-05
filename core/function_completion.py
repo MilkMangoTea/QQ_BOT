@@ -6,7 +6,6 @@ import re
 import httpx
 from openai import OpenAI
 import config
-from core.function import out
 
 # 请求构建器
 def build_params(type, event, content):
@@ -91,7 +90,7 @@ def should_reply_via_zhipu(event) -> bool:
     返回 True/False；异常时保守 False。
     """
     if not (_ZHIPU_NAME and _ZHIPU_URL and _ZHIPU_KEY):
-        out("ZHIPU 未配置，跳过判定", 400)
+        print("400 ZHIPU 未配置，跳过判定")
         return False
 
     text = _extract_text(event)
@@ -130,7 +129,7 @@ def should_reply_via_zhipu(event) -> bool:
         m = re.search(r"\{[\s\S]*\}", content)
         data = json.loads(m.group(0)) if m else {}
         should = bool(data.get("should_reply", False))
-        out("ZHIPU 判定:", {"should": should, "text": text[:48]})
+        print("ZHIPU 判定:", {"should": should, "text": text[:48]})
         return should
     except Exception as e:
         print(f"⚠️ ZHIPU 判定失败: {e}")
