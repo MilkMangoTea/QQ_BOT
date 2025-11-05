@@ -94,7 +94,7 @@ def should_reply_via_zhipu(event, handle_pool_whole) -> bool:
 
     take_n = 5
     ctx_lines = []
-    gid = event.get("group_id")
+    gid = str(event.get("group_id"))
     handle_pool = handle_pool_whole[gid]
 
     if handle_pool:
