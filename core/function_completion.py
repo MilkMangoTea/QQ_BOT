@@ -234,6 +234,7 @@ BOT: 文档链接已发，按 3 步操作即可
         data = json.loads(m.group(0)) if m else {}
         should = bool(data.get("should_reply", False))
         print("ZHIPU 判定:", {
+            "user_prompt": user_prompt,
             "should": should,
             "cat": data.get("category"),
             "conf": data.get("confidence"),
