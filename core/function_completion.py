@@ -23,7 +23,7 @@ def build_params(type, event, content):
 
 
 # 图片转换
-def url_to_base64(url, timeout=(5, 20)):
+async def url_to_base64(url, timeout=(5, 20)):
     """
     返回 data:<mime>;base64,... 或 None（出错时）。
     timeout: (connect_timeout, read_timeout)
@@ -88,7 +88,7 @@ def _extract_text(event) -> str:
     return "".join(parts).strip()
 
 
-def should_reply_via_zhipu(event, handle_pool_whole) -> bool:
+async def should_reply_via_zhipu(event, handle_pool_whole) -> bool:
     if not (_ZHIPU_NAME and _ZHIPU_URL and _ZHIPU_KEY):
         print("400 ZHIPU 未配置，跳过判定")
         return False
