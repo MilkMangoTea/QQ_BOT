@@ -163,7 +163,7 @@ async def remember(websocket, event):
                 if CURRENT_LLM != config.LLM["AIZEX"]:
                     out("🛑 识图功能已关闭", 404)
                     continue
-                image_base64 = await asyncio.to_thread(url_to_base64, log["data"]["url"])
+                image_base64 = await url_to_base64(log["data"]["url"])
                 if image_base64:
                     handle_pool[current_id].append(
                         {"role": "user", "content": [{"type": "image_url", "image_url": {"url": image_base64}}]})

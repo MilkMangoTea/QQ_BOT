@@ -1,3 +1,4 @@
+import asyncio
 import random
 import config
 from core.function_completion import *
@@ -5,6 +6,7 @@ from core.function_memory import *
 from core.function_cmd import *
 import importlib
 import signal
+
 
 def reload_config(signum, frame):
     """信号处理函数，重新加载配置"""
@@ -15,9 +17,11 @@ def reload_config(signum, frame):
 
     print(f"✅配置已重新加载")
 
+
 # 随机文字池子
 def ran_rep_text_only():
     return random.choice(config.POKE)
+
 
 # 戳一戳固定文字响应
 def build_params_text_only(event, content):
@@ -26,9 +30,11 @@ def build_params_text_only(event, content):
     msg_type = "group" if key == "group_id" else "private"
     return {**base, "message_type": msg_type, key: event[key]}
 
+
 # 随机回复
 def ran_rep():
-    return random.randint(1,100) <= config.RAN_REP_PROBABILITY
+    return random.randint(1, 100) <= config.RAN_REP_PROBABILITY
+
 
 # @回复
 def be_atted(event):
@@ -37,6 +43,7 @@ def be_atted(event):
         if log["type"] == "at" and log["data"]["qq"] == str(config.SELF_USER_ID):
             return True
     return False
+
 
 # 条件回复(随机回复，被@，管理员发言，私聊)
 def rep(event, handle_pool):
@@ -47,17 +54,23 @@ def rep(event, handle_pool):
         return True
 
     try:
-        return should_reply_via_zhipu(event, handle_pool)
+        return asyncio.run_coroutine_threadsafe(
+            asyncio.to_thread(should_reply_via_zhipu, event, handle_pool),
+            asyncio.get_running_loop()
+        ).result()
     except Exception as e:
         print(f"⚠️ [rep] ZHIPU 调用异常: {e}")
         return False
 
+
 # 表情随机器
 def ran_emoji():
-    return random.randint(1,100) <= config.RAN_EMOJI_PROBABILITY
+    return random.randint(1, 100) <= config.RAN_EMOJI_PROBABILITY
+
 
 def ran_emoji_content(event):
     return build_params("image", event, random.choice(config.EMOJI_POOL))
+
 
 # 日志输出
 def out(tip, content):
@@ -98,14 +111,17 @@ async def get_nearby_message(websocket, event, llm):
                             target_prompt = "(系统提示:对方想和你说话)"
                         else:
                             target_prompt = "(系统提示:对方在和其他人说话)"
-                        temp_msg +=  target_prompt
-                    elif log2["type"] == "image" and llm == config.LLM["AIZEX"] and log1.get("user_id") != config.SELF_USER_ID:
-                        image_base64 = url_to_base64(log2["data"]["url"])
+                        temp_msg += target_prompt
+                    elif log2["type"] == "image" and llm == config.LLM["AIZEX"] and log1.get(
+                            "user_id") != config.SELF_USER_ID:
+                        image_base64 = await url_to_base64(log2["data"]["url"])
                         if image_base64:
-                            res.append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": image_base64}}]})
+                            res.append({"role": "user",
+                                        "content": [{"type": "image_url", "image_url": {"url": image_base64}}]})
                             out("✅ 新输入:", "[图片]")
                         else:
-                            res.append({"role": "user", "content": [{"type": "text", "text": "(系统提示: 图片获取失败)"}]})
+                            res.append(
+                                {"role": "user", "content": [{"type": "text", "text": "(系统提示: 图片获取失败)"}]})
                 if temp_msg != nickname + ":" and temp_msg != "":
                     if log1.get("user_id") != config.SELF_USER_ID:
                         res.append({"role": "user", "content": [{"type": "text", "text": temp_msg}]})
@@ -114,7 +130,8 @@ async def get_nearby_message(websocket, event, llm):
             return res
 
     except Exception as e:
-            print("⚠️ 获取群聊消息时发生错误:", str(e))
+        print("⚠️ 获取群聊消息时发生错误:", str(e))
+
 
 # 处理 json 格式的回复
 def solve_json(response):
