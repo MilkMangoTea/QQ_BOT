@@ -54,10 +54,7 @@ def rep(event, handle_pool):
         return True
 
     try:
-        return asyncio.run_coroutine_threadsafe(
-            asyncio.to_thread(should_reply_via_zhipu, event, handle_pool),
-            asyncio.get_running_loop()
-        ).result()
+        return should_reply_via_zhipu(event, handle_pool)
     except Exception as e:
         print(f"⚠️ [rep] ZHIPU 调用异常: {e}")
         return False

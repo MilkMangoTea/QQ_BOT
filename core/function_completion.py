@@ -88,7 +88,7 @@ def _extract_text(event) -> str:
     return "".join(parts).strip()
 
 
-async def should_reply_via_zhipu(event, handle_pool_whole) -> bool:
+def should_reply_via_zhipu(event, handle_pool_whole) -> bool:
     if not (_ZHIPU_NAME and _ZHIPU_URL and _ZHIPU_KEY):
         print("400 ZHIPU 未配置，跳过判定")
         return False
