@@ -72,10 +72,10 @@ HTTPX_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20, k
 HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=10.0)
 HTTP_CLIENT = httpx.Client(limits=HTTPX_LIMITS, timeout=HTTPX_TIMEOUT, http2=True)
 
-_ZHIPU = config.LLM.get("ZHIPU", {})
-_ZHIPU_NAME = _ZHIPU.get("NAME")
-_ZHIPU_URL = _ZHIPU.get("URL")
-_ZHIPU_KEY = _ZHIPU.get("KEY")
+_DEEPSEEK = config.LLM.get("DEEPSEEK", {})
+_DEEPSEEK_NAME = _DEEPSEEK.get("NAME")
+_DEEPSEEK_URL = _DEEPSEEK.get("URL")
+_DEEPSEEK_KEY = _DEEPSEEK.get("KEY")
 
 
 def _extract_text(event) -> str:
@@ -88,9 +88,9 @@ def _extract_text(event) -> str:
     return "".join(parts).strip()
 
 
-def should_reply_via_zhipu(event, handle_pool_whole) -> bool:
-    if not (_ZHIPU_NAME and _ZHIPU_URL and _ZHIPU_KEY):
-        print("400 ZHIPU 未配置，跳过判定")
+def should_reply_via_deepseek(event, handle_pool_whole) -> bool:
+    if not (_DEEPSEEK_NAME and _DEEPSEEK_URL and _DEEPSEEK_KEY):
+        print("400 DEEPSEEK 未配置，跳过判定")
         return False
 
     curr_text = _extract_text(event)
@@ -217,14 +217,14 @@ BOT: 文档链接已发，按步骤执行即可
 
     try:
         cli = OpenAI(
-            api_key=_ZHIPU_KEY,
-            base_url=_ZHIPU_URL,
+            api_key=_DEEPSEEK_KEY,
+            base_url=_DEEPSEEK_URL,
             timeout=15.0,
             max_retries=2,
             http_client=HTTP_CLIENT,
         )
         resp = cli.chat.completions.create(
-            model=_ZHIPU_NAME,
+            model=_DEEPSEEK_NAME,
             messages=[
                 {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
                 {"role": "user", "content": [{"type": "text", "text": user_prompt}]},
@@ -237,7 +237,7 @@ BOT: 文档链接已发，按步骤执行即可
         m = re.search(r"\{[\s\S]*\}", content)
         data = json.loads(m.group(0)) if m else {}
         should = bool(data.get("should_reply", False))
-        print("ZHIPU 判定:", {
+        print("DEEPSEEK 判定:", {
             "user_prompt": user_prompt,
             "should": should,
             "cat": data.get("category"),
@@ -246,5 +246,5 @@ BOT: 文档链接已发，按步骤执行即可
         })
         return should
     except Exception as e:
-        print(f"⚠️ ZHIPU 判定失败: {e}")
+        print(f"⚠️ DEEPSEEK 判定失败: {e}")
         return False
