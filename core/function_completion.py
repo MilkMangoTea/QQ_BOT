@@ -7,6 +7,7 @@ import httpx
 from openai import OpenAI
 import config
 
+
 # 请求构建器
 def build_params(type, event, content):
     msg_type = event.get("message_type")
@@ -20,8 +21,9 @@ def build_params(type, event, content):
     key = "user_id" if msg_type == "private" else "group_id"
     return {**base, "message_type": msg_type, key: event[key]}
 
+
 # 图片转换
-def url_to_base64(url, timeout=(5,20)):
+def url_to_base64(url, timeout=(5, 20)):
     """
     返回 data:<mime>;base64,... 或 None（出错时）。
     timeout: (connect_timeout, read_timeout)
@@ -35,7 +37,7 @@ def url_to_base64(url, timeout=(5,20)):
                            "AppleWebKit/537.36 (KHTML, like Gecko) "
                            "Chrome/120.0.0.0 Safari/537.36"),
             "Accept": "image/*,*/*;q=0.8",
-            "Referer": origin,   # 有些站需要防盗链
+            "Referer": origin,  # 有些站需要防盗链
         }
 
         resp = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
@@ -64,15 +66,17 @@ def url_to_base64(url, timeout=(5,20)):
         print(f"⚠️ 处理异常: {e}")
     return None
 
+
 # 轻量 httpx Client
-HTTPX_LIMITS  = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=20.0)
+HTTPX_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=20.0)
 HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=10.0)
-HTTP_CLIENT   = httpx.Client(limits=HTTPX_LIMITS, timeout=HTTPX_TIMEOUT, http2=True)
+HTTP_CLIENT = httpx.Client(limits=HTTPX_LIMITS, timeout=HTTPX_TIMEOUT, http2=True)
 
 _ZHIPU = config.LLM.get("ZHIPU", {})
 _ZHIPU_NAME = _ZHIPU.get("NAME")
-_ZHIPU_URL  = _ZHIPU.get("URL")
-_ZHIPU_KEY  = _ZHIPU.get("KEY")
+_ZHIPU_URL = _ZHIPU.get("URL")
+_ZHIPU_KEY = _ZHIPU.get("KEY")
+
 
 def _extract_text(event) -> str:
     parts = []
@@ -82,6 +86,7 @@ def _extract_text(event) -> str:
             if t:
                 parts.append(t)
     return "".join(parts).strip()
+
 
 def should_reply_via_zhipu(event, handle_pool_whole) -> bool:
     if not (_ZHIPU_NAME and _ZHIPU_URL and _ZHIPU_KEY):
@@ -135,26 +140,68 @@ def should_reply_via_zhipu(event, handle_pool_whole) -> bool:
     ctx_block = "\n".join(ctx_lines) if ctx_lines else "（无）"
 
     system_prompt = (
-        "你是一个群聊消息路由器，只判断机器人是否应该在当前群消息下发言。"
-        "严格只输出 JSON："
-        "{\"should_reply\": true/false, \"category\": \"FOLLOWUP|QUESTION|CHITCHAT|OTHER|NOISE\", \"confidence\": 0~1}\n"
-        "【如何读上下文】\n"
-        "- 上下文中的行首为“BOT: ”的是机器人历史发言；\n"
-        "- 行首为“昵称：”或“昵称:”的是群友发言（例如：张三: …… 或 张三：……），保持原样；\n"
-        "- 你要结合最近几条的语义关系来判断是否自然需要回应。\n"
-        "【像群友一样的决策原则（从高到低）】\n"
-        "1) FOLLOWUP：如果当前消息与最近的 BOT 发言存在明显的延续关系（追问、澄清、让继续、提出异议、补充信息），应该回复 -> should_reply=true, category=FOLLOWUP。\n"
-        "2) QUESTION：面向群体的求助/疑问/征求意见（如“有没有人知道…/怎么…/为啥…/能不能…/大家怎么看”），即使没有点名机器人，也应该参与 -> true, category=QUESTION。\n"
-        "3) CHITCHAT：轻度社交但与前面的技术/信息上下文相关，且你的回应能增加价值或推动交流（例如在讨论进展时的简短确认/建议），可以回复 -> true, category=CHITCHAT。纯寒暄/无价值的社交不要回复。\n"
-        "4) OTHER：人和人之间的侧聊、与话题无关的插话、内部行政/组织协调但没有问题指向，通常不需要机器人回复 -> false, category=OTHER。\n"
-        "5) NOISE：复读、纯表情/贴图/无意义数字或单词、与任何上下文无关的一句话（且最近几条没有 BOT 发言），不要回复 -> false, category=NOISE。\n"
-        "【细化判断】\n"
-        "- 如果最近 1~3 条包含 BOT: 且当前消息是“再说下/不太明白/为啥/怎么做/哪一步不行/继续/还有吗/举个例子”等延续语义，判 FOLLOWUP=true。\n"
-        "- 如果当前消息内容很短（如“？”、“1”、“好的”），只有在紧挨着 BOT 发言且能推进对话时才可能回复；否则视为 NOISE/OTHER。\n"
-        "- 如果当前消息以“某某：”开头且语义明显是在和特定人类成员对话（不是 BOT），通常不要插话 -> false。\n"
-        "- 如果出现“有没有人/大家/谁懂/求支招/求看下”等群体求助词，即使没有问号，也按 QUESTION 处理 -> true。\n"
-        "- 不要因为单纯的情绪/口头禅/灌水而回复；不确定时偏保守（false）。\n"
-        "【输出要求】只返回 JSON，不要解释或附加任何文本。"
+        """
+        你是一个“群聊消息路由器”，唯一职责：判断机器人是否应该在当前群消息下发言，并给出类别与置信度。你只依据输入里提供的上下文文本进行判断。
+
+【只输出 JSON】
+严格只返回以下 JSON，一行输出、键名固定、布尔用 true/false、枚举为大写：
+{"should_reply": true/false, "category": "FOLLOWUP|QUESTION|CHITCHAT|OTHER|NOISE", "confidence": 0~1}
+不要输出任何解释、注释、代码块标记或额外字符。
+
+【如何读取上下文】
+- “BOT: ” 开头为机器人历史发言。
+- “群友A：/群友A:”（或群友B/群友C…）为群成员发言，保持原样。
+- 只基于当前提供的上下文语义关系进行判断；越贴近最近一轮主题，越倾向需要回复。
+
+【像普通群友的决策原则（从高到低）】
+1) FOLLOWUP（延续 BOT 话题）
+   - 当前消息与最近的 BOT 发言同一主题，且有追问/澄清/让继续/提出异议/补充信息等意图词（如“再说下/不明白/为啥/怎么做/哪一步不行/继续/还有吗/举个例子/给个链接”）。
+   - 输出：{"should_reply": true, "category": "FOLLOWUP", "confidence": 0.9}
+
+2) QUESTION（面向群体的求助/疑问/征求意见）
+   - 含“有没有人/大家/谁懂/求支招/求看下/怎么/为什么/能不能/怎么办”等群体求助语，即使没有问号也算。
+   - 输出：{"should_reply": true, "category": "QUESTION", "confidence": 0.8}
+
+3) CHITCHAT（与当前话题相关的轻社交，像人一样简短回应）
+   - 你的回应能自然推进（确认、鼓励、收尾、简短建议/指路），**避免过多专业内容或长篇解释**。
+   - 输出：{"should_reply": true, "category": "CHITCHAT", "confidence": 0.65}
+
+4) OTHER（人与人侧聊/与话题无关/行政协调且无明确问题指向）
+   - 明确点名某个群友（如“群友B：…”）且与机器人无关时，通常不要插话。
+   - 输出：{"should_reply": false, "category": "OTHER", "confidence": 0.7}
+
+5) NOISE（复读、表情、无意义片段，或与上下文完全脱节）
+   - 极短消息如“？”、“1”、“好的/OK”，仅当能够明显推进对话时才考虑回复；否则视为 NOISE 或 OTHER。
+   - 输出：{"should_reply": false, "category": "NOISE", "confidence": 0.8}
+
+【few-shot（示例，仅用于内部判断，不要在输出中复述）】
+示例1（FOLLOWUP）
+BOT: 上面这三步跑通后，再执行 init
+群友A：为啥我到第二步就报错？
+→ {"should_reply": true, "category": "FOLLOWUP", "confidence": 0.9}
+
+示例2（QUESTION）
+群友B：有没有人知道今晚订餐走哪家？
+→ {"should_reply": true, "category": "QUESTION", "confidence": 0.8}
+
+示例3（CHITCHAT 收尾）
+BOT: 文档链接已发，按 3 步操作即可
+群友C：谢谢 我晚点试试
+→ {"should_reply": true, "category": "CHITCHAT", "confidence": 0.65}
+
+示例4（OTHER）
+群友A：群友B：表格今晚前传我
+→ {"should_reply": false, "category": "OTHER", "confidence": 0.7}
+
+示例5（NOISE）
+群友B：？
+→ {"should_reply": false, "category": "NOISE", "confidence": 0.8}
+
+【稳健性】
+- 永远只输出一行合法 JSON；不要输出任何多余内容。
+- 遇到未知语言/口头禅/火星文，按 OTHER 或 NOISE 保守处理。
+- 以“像普通群友”的自然交流为准则：简短、有礼、不过度专业。
+"""
     )
 
     user_prompt = (
@@ -176,7 +223,7 @@ def should_reply_via_zhipu(event, handle_pool_whole) -> bool:
             model=_ZHIPU_NAME,
             messages=[
                 {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
-                {"role": "user",   "content": [{"type": "text", "text": user_prompt}]},
+                {"role": "user", "content": [{"type": "text", "text": user_prompt}]},
             ],
             temperature=0,
             top_p=1,
@@ -196,4 +243,3 @@ def should_reply_via_zhipu(event, handle_pool_whole) -> bool:
     except Exception as e:
         print(f"⚠️ ZHIPU 判定失败: {e}")
         return False
-
