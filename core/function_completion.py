@@ -72,7 +72,7 @@ HTTPX_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20, k
 HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=10.0)
 HTTP_CLIENT = httpx.Client(limits=HTTPX_LIMITS, timeout=HTTPX_TIMEOUT, http2=True)
 
-_DEEPSEEK = config.LLM.get("DEEPSEEK", {})
+_DEEPSEEK = config.LLM.get("DEEPSEEK-V3", {})
 _DEEPSEEK_NAME = _DEEPSEEK.get("NAME")
 _DEEPSEEK_URL = _DEEPSEEK.get("URL")
 _DEEPSEEK_KEY = _DEEPSEEK.get("KEY")
