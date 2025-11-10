@@ -1,14 +1,82 @@
+"""
+依赖：
+    pip install "langchain>=0.2" langchain-openai
+    # 语义相似 few-shot（可选）
+    pip install langchain-community faiss-cpu
+"""
+
 import base64
 import requests
 import urllib.parse
 import json
 import re
+import os
 import httpx
+from typing import Any, Dict, List
+
+# 保留：可能在其它地方被用到
 from openai import OpenAI
 import config
 
+# ===== LangChain 相关 =====
+from langchain_core.pydantic_v1 import BaseModel, Field
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_core.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate
+from langchain_core.example_selectors import SemanticSimilarityExampleSelector
+from langchain_core.caches import InMemoryCache
+from langchain_core.globals import set_llm_cache
 
-# 请求构建器
+try:
+    from langchain_community.vectorstores import FAISS
+
+    _HAS_FAISS = True
+except Exception:
+    _HAS_FAISS = False
+
+_IMG_TYPES = {"image", "img", "photo", "picture", "sticker"}
+
+
+def _text_has_meaningful_words(text: str, min_chars: int = 2) -> bool:
+    """是否含有有效文字（中英数字至少 min_chars 个）。"""
+    if not text:
+        return False
+    # 去空白与常见无意义字符
+    t = re.sub(r"\s+", "", text)
+    t = re.sub(r"^[\.\!\?。？！、…~\-—_]+$", "", t)
+    return bool(re.search(r"[A-Za-z0-9\u4e00-\u9fff]", t)) and len(t) >= min_chars
+
+
+def is_image_only_event(event: dict) -> bool:
+    """
+    仅基于分段 type 判断：如果消息里出现至少一个图片分段(type ∈ _IMG_TYPES)，
+    且没有任何包含“有效文字”的 text 分段，则视为“图片-only”。
+    """
+    has_image = False
+    has_text_meaning = False
+
+    for seg in event.get("message", []):
+        t = (seg.get("type") or "").lower()
+        data = seg.get("data", {}) or {}
+
+        if t in _IMG_TYPES:
+            has_image = True
+            continue
+
+        if t == "text":
+            text = (data.get("text") or "").strip()
+            if _text_has_meaningful_words(text):
+                has_text_meaning = True
+
+    # 兜底检查顶层 text 字段
+    if not has_text_meaning:
+        fallback = (event.get("text") or "").strip()
+        if _text_has_meaningful_words(fallback):
+            has_text_meaning = True
+
+    return has_image and not has_text_meaning
+
+
+# 请求构建器（原样保留）
 def build_params(type, event, content):
     msg_type = event.get("message_type")
     base = ""
@@ -22,7 +90,7 @@ def build_params(type, event, content):
     return {**base, "message_type": msg_type, key: event[key]}
 
 
-# 图片转换
+# 图片转换（原样保留）
 async def url_to_base64(url, timeout=(5, 20)):
     """
     返回 data:<mime>;base64,... 或 None（出错时）。
@@ -37,7 +105,7 @@ async def url_to_base64(url, timeout=(5, 20)):
                            "AppleWebKit/537.36 (KHTML, like Gecko) "
                            "Chrome/120.0.0.0 Safari/537.36"),
             "Accept": "image/*,*/*;q=0.8",
-            "Referer": origin,  # 有些站需要防盗链
+            "Referer": origin,
         }
 
         resp = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
@@ -45,7 +113,7 @@ async def url_to_base64(url, timeout=(5, 20)):
         content = resp.content
 
         ct = (resp.headers.get("Content-Type") or "").split(";")[0].lower()
-        # 简单的 magic-bytes 嗅探（防止 Content-Type 错误）
+        # 简易 magic bytes 嗅探
         if not ct.startswith("image/"):
             if content.startswith(b"\x89PNG\r\n\x1a\n"):
                 ct = "image/png"
@@ -72,14 +140,17 @@ HTTPX_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20, k
 HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=10.0)
 HTTP_CLIENT = httpx.Client(limits=HTTPX_LIMITS, timeout=HTTPX_TIMEOUT, http2=True)
 
+# 模型配置
 _DEEPSEEK = config.LLM.get("DEEPSEEK-V3", {})
 _DEEPSEEK_NAME = _DEEPSEEK.get("NAME")
 _DEEPSEEK_URL = _DEEPSEEK.get("URL")
 _DEEPSEEK_KEY = _DEEPSEEK.get("KEY")
+_EMB_MODEL = os.getenv("EMB_MODEL", "text-embedding-3-small")
 
 
+# 提取当前消息文本
 def _extract_text(event) -> str:
-    parts = []
+    parts: List[str] = []
     for seg in event.get("message", []):
         if seg.get("type") == "text":
             t = seg.get("data", {}).get("text", "")
@@ -88,26 +159,134 @@ def _extract_text(event) -> str:
     return "".join(parts).strip()
 
 
-def should_reply_via_deepseek(event, handle_pool_whole) -> bool:
+# LangChain 结构化输出定义
+class Decision(BaseModel):
+    should_reply: bool = Field(description="Whether the bot should reply.")
+    category: str = Field(description="FOLLOWUP | QUESTION | CHITCHAT | OTHER | NOISE")
+    confidence: float = Field(ge=0, le=1, description="0~1 confidence score")
+
+
+# few-shot 示例
+_EXAMPLES = [
+    {
+        "input": "BOT: 已给出三步操作\n群友A: 第2步不明白，能再说说吗",
+        "output": {"should_reply": True, "category": "FOLLOWUP", "confidence": 0.9}
+    },
+    {
+        "input": "群友B: 大家怎么在 Mac 上配代理？",
+        "output": {"should_reply": True, "category": "QUESTION", "confidence": 0.8}
+    },
+    {
+        "input": "BOT: 文档链接已发，按步骤执行即可\n群友C: 谢谢机器人",
+        "output": {"should_reply": True, "category": "CHITCHAT", "confidence": 0.65}
+    },
+    {
+        "input": "群友A: @小王 表格今晚前发我",
+        "output": {"should_reply": False, "category": "OTHER", "confidence": 0.8}
+    },
+    {
+        "input": "群友B: ？",
+        "output": {"should_reply": False, "category": "NOISE", "confidence": 0.8}
+    },
+]
+_example_prompt = ChatPromptTemplate.from_messages([
+    ("human", "{input}"),
+    ("ai", "{output}")
+])
+
+
+def _build_fewshot():
+    try:
+        if _HAS_FAISS:
+            selector = SemanticSimilarityExampleSelector.from_examples(
+                _EXAMPLES,
+                OpenAIEmbeddings(model=_EMB_MODEL),
+                FAISS,
+                k=4,
+            )
+            return FewShotChatMessagePromptTemplate(
+                example_selector=selector,
+                example_prompt=_example_prompt,
+                input_variables=["ctx", "user_message"],
+            )
+    except Exception as e:
+        print("相似 few-shot 初始化失败，退化为静态 few-shot：", e)
+
+    return FewShotChatMessagePromptTemplate(
+        examples=_EXAMPLES,
+        example_prompt=_example_prompt,
+        input_variables=["ctx", "user_message"],
+    )
+
+
+_FEWSHOT = _build_fewshot()
+
+_SYSTEM = """你是一个“群聊消息路由器”，唯一职责：判断机器人是否应该在当前群消息下发言，并给出类别。
+只返回 JSON：{"should_reply": true/false, "category": "FOLLOWUP|QUESTION|CHITCHAT|OTHER|NOISE", "confidence": 0~1}
+不要解释。
+"""
+
+_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", _SYSTEM),
+    _FEWSHOT,
+    ("human",
+     "【群聊最近上下文】\n{ctx}\n\n"
+     "【当前消息】\n{user_message}\n"
+     "只返回 JSON。"
+     ),
+])
+
+
+def _make_llm():
     if not (_DEEPSEEK_NAME and _DEEPSEEK_URL and _DEEPSEEK_KEY):
-        print("400 DEEPSEEK 未配置，跳过判定")
-        return False
+        raise RuntimeError("DEEPSEEK(OpenAI-compatible) 未配置：请在 config.LLM['DEEPSEEK-V3'] 中设置 NAME/URL/KEY")
+    return ChatOpenAI(
+        model=_DEEPSEEK_NAME,
+        api_key=_DEEPSEEK_KEY,
+        base_url=_DEEPSEEK_URL,
+        temperature=0.0,
+        timeout=12,
+        max_retries=2,
+    )
+
+
+set_llm_cache(InMemoryCache())
+
+
+def _decision_chain():
+    llm = _make_llm()
+    return _PROMPT | llm.with_structured_output(Decision)
+
+
+# LangChain 版定
+def should_reply_langchain(event: Dict[str, Any], handle_pool_whole) -> bool:
+    """
+    - 图片-only：直接 False（仅依据分段 type）
+    - 无文本：直接 False
+    - 其余交给 LangChain 结构化输出链
+    """
+    try:
+        if is_image_only_event(event):
+            print("跳过：图片-only/无有效文本")
+            return False
+    except Exception:
+        pass
 
     curr_text = _extract_text(event)
     if not curr_text:
         return False
 
-    take_n = 5
-    ctx_lines = []
+    # 最近上下文
+    take_n = 10
+    ctx_lines: List[str] = []
     gid = str(event.get("group_id"))
-    handle_pool = handle_pool_whole[gid]
+    handle_pool = (handle_pool_whole or {}).get(gid)
 
     if handle_pool:
-        # 取最近 N 条，按时间正序给模型
-        for item in reversed(list(handle_pool)[-take_n:]):
+        for item in list(handle_pool)[-take_n:]:
+            role = (item.get("role") or "").lower() if isinstance(item, dict) else ""
+            text_line = ""
             if isinstance(item, dict):
-                role = (item.get("role") or "").lower()
-                text_line = ""
                 if isinstance(item.get("content"), list):
                     parts = []
                     for seg in item["content"]:
@@ -119,132 +298,30 @@ def should_reply_via_deepseek(event, handle_pool_whole) -> bool:
                 else:
                     text_line = (item.get("text") or "").strip()
             else:
-                role = ""
                 text_line = str(item).strip()
 
             if not text_line:
                 continue
 
-            # 根据 role 标注：user 行保留，assistant 行加 BOT
-            if role == "assistant":
-                line = f"BOT: {text_line}"
-            else:
-                line = text_line
-
+            line = f"BOT: {text_line}" if role == "assistant" else text_line
             if len(line) > 240:
                 line = line[:240] + "…"
             ctx_lines.append(line)
 
-        ctx_lines.reverse()
-
-    ctx_block = "\n".join(ctx_lines) if ctx_lines else "（无）"
-
-    system_prompt = (
-        """
-你是一个“群聊消息路由器”，唯一职责：判断机器人是否应该在当前群消息下发言，并给出类别。
-
-【只输出 JSON】
-只返回这一行 JSON（键名固定、枚举大写）：
-{"should_reply": true/false, "category": "FOLLOWUP|QUESTION|CHITCHAT|OTHER|NOISE", "confidence": 0~1}
-不要输出任何解释或额外字符。若不使用置信度，可固定 0.7/0.8/0.9 等离散值。
-
-【上下文说明】
-- “BOT: ” 为机器人历史发言；“群友A: / 群友B: / 群友C:” 为群成员发言。
-- 仅依据输入中给到的上下文语义进行判断；不要进行计数或推断未提供的信息。
-
-【像普通群友的决策原则（弹性语义）】
-1) FOLLOWUP（对 BOT 话语或既有互动约定的自然延续）
-   - 语义延续：当前消息与最近的 BOT 话题在语义上紧密相关，并包含追问/澄清/让继续/异议/补充等意图。
-   - 互动约定（微协议）：上下文中若出现“当/如果/以后…就…/看到…请…/我说…你…/我发…你…”等**期望机器人按某触发做出回应**的承诺或约定，
-     当后续消息语义上**匹配或高度相似**于该触发（允许轻微变体、同义改写、空白/标点差异），视为该约定被触发，应回复。
-   - 极短消息（如单词/数字/符号）**若语义上能指向上述约定或延续**，也按 FOLLOWUP；否则不要因为短而默认回复。
-
-2) QUESTION（面向群体的求助/征求意见）
-   - 识别群体求助语义（如“有没有人/大家/谁懂/求看下/怎么/为什么/能不能/怎么办”等），即使没有问号也算。
-   - 若问题明显非向机器人但机器人能提供有益、简短的意见，也可参与；若是明确的人与人对接且与机器人无关，转 OTHER。
-
-3) CHITCHAT（与当前话题相关的轻社交）
-   - 你的介入能自然推进（简短确认、鼓励、收尾、轻建议/指路），**避免专业长篇**。纯寒暄不回。
-
-4) OTHER（人与人侧聊或与机器人无关的协调）
-   - 明确点名某个群友进行交接/安排，且与机器人无关时，不插话。
-
-5) NOISE（复读、表情、无意义片段、与上下文完全脱节）
-   - 仅当无法与任何话题或互动约定建立清晰语义联系时，判为 NOISE。
-
-【置信度（离散映射，避免“估概率”）】
-- FOLLOWUP = 0.9，QUESTION = 0.8，CHITCHAT = 0.65，OTHER/NOISE = 0.8（可按需统一固定为 0.7）。
-
-【few-shot（只用作内部判断，不要在输出中复述）】
-示例1（FOLLOWUP·延续）
-BOT: 已给出三步操作
-群友A: 第2步不明白，能再说说吗
-→ {"should_reply": true, "category": "FOLLOWUP", "confidence": 0.9}
-
-示例2（FOLLOWUP·互动约定触发，内容可变体）
-群友A: 当我说 <触发词> 时，你简单答复就好
-BOT: 明白
-群友A: <触发词>   （或轻微变体，如空白/标点差异）
-→ {"should_reply": true, "category": "FOLLOWUP", "confidence": 0.9}
-
-示例3（QUESTION）
-群友B: 大家有推荐的午餐吗
-→ {"should_reply": true, "category": "QUESTION", "confidence": 0.8}
-
-示例4（CHITCHAT）
-BOT: 文档链接已发，按步骤执行即可
-群友C: 好的我晚上试试
-→ {"should_reply": true, "category": "CHITCHAT", "confidence": 0.65}
-
-示例5（OTHER）
-群友A: 群友B: 表格今晚前发我
-→ {"should_reply": false, "category": "OTHER", "confidence": 0.8}
-
-示例6（NOISE）
-群友B: ？
-（上下文无明确话题或约定可指向）
-→ {"should_reply": false, "category": "NOISE", "confidence": 0.8}
-
-"""
-    )
-
-    user_prompt = (
-        f"【群聊最近上下文】\n{ctx_block}\n\n"
-        f"【当前消息】\n{curr_text}\n"
-        f"【元信息】type={event.get('message_type')}, gid={event.get('group_id')}, uid={event.get('user_id')}\n"
-        "只返回 JSON。"
-    )
+    ctx = "\n".join(ctx_lines) if ctx_lines else "（无）"
 
     try:
-        cli = OpenAI(
-            api_key=_DEEPSEEK_KEY,
-            base_url=_DEEPSEEK_URL,
-            timeout=15.0,
-            max_retries=2,
-            http_client=HTTP_CLIENT,
-        )
-        resp = cli.chat.completions.create(
-            model=_DEEPSEEK_NAME,
-            messages=[
-                {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
-                {"role": "user", "content": [{"type": "text", "text": user_prompt}]},
-            ],
-            temperature=0,
-            top_p=1,
-            timeout=15.0
-        )
-        content = (resp.choices[0].message.content or "").strip()
-        m = re.search(r"\{[\s\S]*\}", content)
-        data = json.loads(m.group(0)) if m else {}
-        should = bool(data.get("should_reply", False))
-        print("DEEPSEEK 判定:", {
-            "user_prompt": user_prompt,
+        dec = _decision_chain().invoke({"ctx": ctx, "user_message": curr_text})
+        should = bool(dec.should_reply)
+        print("LC 判定:", {
             "should": should,
-            "cat": data.get("category"),
-            "conf": data.get("confidence"),
+            "cat": dec.category,
+            "conf": dec.confidence,
             "curr": curr_text[:48]
         })
+        if (dec.confidence or 0) < 0.55 and dec.category != "QUESTION":
+            return False
         return should
     except Exception as e:
-        print(f"⚠️ DEEPSEEK 判定失败: {e}")
+        print(f"⚠️ LangChain 判定失败: {e}")
         return False

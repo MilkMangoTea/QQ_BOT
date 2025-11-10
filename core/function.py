@@ -54,7 +54,7 @@ def rep(event, handle_pool):
         return True
 
     try:
-        return should_reply_via_deepseek(event, handle_pool)
+        return should_reply_langchain(event, handle_pool)
     except Exception as e:
         print(f"⚠️ [rep] ZHIPU 调用异常: {e}")
         return False
