@@ -221,20 +221,20 @@ def _build_fewshot():
 
 _FEWSHOT = _build_fewshot()
 
-_SYSTEM = """你是一个“群聊消息路由器”，唯一职责：判断机器人是否应该在当前群消息下发言，并给出类别。
-只返回 JSON：{"should_reply": true/false, "category": "FOLLOWUP|QUESTION|CHITCHAT|OTHER|NOISE", "confidence": 0~1}
+_RULES_TEXT = """你是一个“群聊消息路由器”，唯一职责：判断机器人是否应该在当前群消息下发言，并给出类别。
+只返回 JSON，键名固定且大写枚举：{"should_reply": true/false, "category": "FOLLOWUP|QUESTION|CHITCHAT|OTHER|NOISE", "confidence": 0~1}
 不要解释。
 """
 
 _PROMPT = ChatPromptTemplate.from_messages([
-    ("system", _SYSTEM),
+    ("system", "{rules}"),
     _FEWSHOT,
     ("human",
      "【群聊最近上下文】\n{ctx}\n\n"
      "【当前消息】\n{user_message}\n"
      "只返回 JSON。"
-     ),
-])
+    ),
+]).partial(rules=_RULES_TEXT)
 
 
 def _make_llm():
