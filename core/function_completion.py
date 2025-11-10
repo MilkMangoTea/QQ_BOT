@@ -1,21 +1,8 @@
-"""
-依赖：
-    pip install "langchain>=0.2" langchain-openai
-    # 语义相似 few-shot（可选）
-    pip install langchain-community faiss-cpu
-"""
-
-import base64
 import requests
 import urllib.parse
-import json
 import re
-import os
 import httpx
 from typing import Any, Dict, List
-
-# 保留：可能在其它地方被用到
-from openai import OpenAI
 import config
 
 # ===== LangChain 相关 =====
@@ -159,26 +146,18 @@ class Decision(BaseModel):
 
 # few-shot 示例
 _EXAMPLES = [
-    {
-        "input": "BOT: 已给出三步操作\n群友A: 第2步不明白，能再说说吗",
-        "output": {"should_reply": True, "category": "FOLLOWUP", "confidence": 0.9}
-    },
-    {
-        "input": "群友B: 大家怎么在 Mac 上配代理？",
-        "output": {"should_reply": True, "category": "QUESTION", "confidence": 0.8}
-    },
-    {
-        "input": "BOT: 文档链接已发，按步骤执行即可\n群友C: 谢谢机器人",
-        "output": {"should_reply": True, "category": "CHITCHAT", "confidence": 0.65}
-    },
-    {
-        "input": "群友A: @小王 表格今晚前发我",
-        "output": {"should_reply": False, "category": "OTHER", "confidence": 0.8}
-    },
-    {
-        "input": "群友B: ？",
-        "output": {"should_reply": False, "category": "NOISE", "confidence": 0.8}
-    },
+  {
+    "input": "上下文: 在聊代理设置。 当前消息: Mac上怎么全局代理？",
+    "output": {"should_reply": True, "category": "QUESTION", "confidence": 0.9}
+  },
+  {
+    "input": "上下文: 机器人刚给了步骤。 当前消息: 证书在哪导入？",
+    "output": {"should_reply": True, "category": "FOLLOWUP", "confidence": 0.9}
+  },
+  {
+    "input": "上下文: 无。 当前消息: ？？？",
+    "output": {"should_reply": False, "category": "NOISE", "confidence": 0.85}
+  }
 ]
 _example_prompt = ChatPromptTemplate.from_messages([
     ("human", "{input}"),
@@ -196,10 +175,42 @@ def _build_fewshot():
 
 _FEWSHOT = _build_fewshot()
 
-_RULES_TEXT = """你是一个“群聊消息路由器”，唯一职责：判断机器人是否应该在当前群消息下发言，并给出类别。
-只返回 JSON，键名固定且大写枚举：{"should_reply": true/false, "category": "FOLLOWUP|QUESTION|CHITCHAT|OTHER|NOISE", "confidence": 0~1}
-不要解释。
+_RULES_TEXT = """
+你是“群聊消息路由器”。目标：基于上下文与当前消息，按【猫娘】人设判断此刻是否应该发言。
+只返回 JSON，键固定且唯一：
+{"should_reply": true/false, "category": "FOLLOWUP|QUESTION|CHITCHAT|OTHER|NOISE", "confidence": 0~1}
+不要输出解释、前后缀或多余文本。
+
+【人设基调】
+- 轻松俏皮、略傲娇；偏短句，偶尔口癖（如“喵/～”）。愿意接轻社交与情绪安抚，但不强行插话。
+
+【优先回复（强触发）】
+1) 明确问题/求助，能给具体解法或方向（如“怎么/为何/能否/在哪设置”等）。
+2) 对机器人先前内容的追问、澄清、继续推进（FOLLOWUP）。
+3) 有明确情绪需要安抚或鼓励（沮丧、道歉、感谢、祝福），且与最近上下文有关联。
+
+【可选回复（弱触发，视上下文而定）】
+- 轻社交寒暄、玩梗、致谢、简短互动，若与最近话题或人设有明显关联（CHITCHAT）。
+
+【不回复（强抑制）】
+- 无信息量或扰动：纯无意义符号/重复标点/口水（例如“？？？”，“……”），刷屏，广告拉群。
+- 与当前话题和人设无关的长篇争论或敏感对立话题（非安抚/纠偏场景）。
+- 纯转发或模板通知，机器人难以增量提供价值。
+
+【分类口径】
+- FOLLOWUP：基于机器人近期输出的继续追问/澄清/推进。
+- QUESTION：明确求助/问题。
+- CHITCHAT：寒暄、玩笑、致谢、祝福、轻度感叹或情绪交流。
+- OTHER：与主题相关但不符合以上三类，且不属于噪音。
+- NOISE：广告/刷屏/无信息量/与上下文完全脱节的扰动。
+
+【信心分参考（仅作打分倾向）】
+- 明确问题 +0.30；FOLLOWUP +0.30；情绪安抚/致谢且有关联 +0.20；轻社交有关联 +0.15；
+- 明显无关 -0.30；噪音/广告 -0.40；
+- 倾向短句：若是长段无问句且无明确诉求，可 -0.10；
+- 综合后在 0~1 内给出合理分值。
 """
+
 
 _PROMPT = ChatPromptTemplate.from_messages([
     ("system", "{rules}"),
