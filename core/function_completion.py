@@ -20,18 +20,10 @@ import config
 
 # ===== LangChain 相关 =====
 from langchain_core.pydantic_v1 import BaseModel, Field
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate
-from langchain_core.example_selectors import SemanticSimilarityExampleSelector
 from langchain_core.caches import InMemoryCache
 from langchain_core.globals import set_llm_cache
-
-try:
-    from langchain_community.vectorstores import FAISS
-
-    _HAS_FAISS = True
-except Exception:
-    _HAS_FAISS = False
 
 _IMG_TYPES = {"image", "img", "photo", "picture", "sticker"}
 
@@ -145,7 +137,6 @@ _DEEPSEEK = config.LLM.get("DEEPSEEK-V3", {})
 _DEEPSEEK_NAME = _DEEPSEEK.get("NAME")
 _DEEPSEEK_URL = _DEEPSEEK.get("URL")
 _DEEPSEEK_KEY = _DEEPSEEK.get("KEY")
-_EMB_MODEL = os.getenv("EMB_MODEL", "text-embedding-3-small")
 
 
 # 提取当前消息文本
@@ -196,22 +187,6 @@ _example_prompt = ChatPromptTemplate.from_messages([
 
 
 def _build_fewshot():
-    try:
-        if _HAS_FAISS:
-            selector = SemanticSimilarityExampleSelector.from_examples(
-                _EXAMPLES,
-                OpenAIEmbeddings(model=_EMB_MODEL),
-                FAISS,
-                k=4,
-            )
-            return FewShotChatMessagePromptTemplate(
-                example_selector=selector,
-                example_prompt=_example_prompt,
-                input_variables=["ctx", "user_message"],
-            )
-    except Exception as e:
-        print("相似 few-shot 初始化失败，退化为静态 few-shot：", e)
-
     return FewShotChatMessagePromptTemplate(
         examples=_EXAMPLES,
         example_prompt=_example_prompt,
