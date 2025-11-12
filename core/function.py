@@ -111,7 +111,7 @@ async def get_nearby_message(websocket, event, llm):
                         temp_msg += target_prompt
                     elif log2["type"] == "image" and llm == config.LLM["AIZEX"] and log1.get(
                             "user_id") != config.SELF_USER_ID:
-                        image_base64 = await url_to_base64(log2["data"]["url"])
+                        image_base64 = url_to_base64(log2["data"]["url"])
                         if image_base64:
                             res.append({"role": "user",
                                         "content": [{"type": "image_url", "image_url": {"url": image_base64}}]})
