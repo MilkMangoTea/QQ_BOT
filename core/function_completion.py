@@ -71,7 +71,7 @@ def build_params(type, event, content):
 
 
 # 图片转换（原样保留）
-def url_to_base64(url, timeout=(5, 20)):
+async def url_to_base64(url, timeout=(5, 20)):
     """
     返回 data:<mime>;base64,... 或 None（出错时）。
     timeout: (connect_timeout, read_timeout)
