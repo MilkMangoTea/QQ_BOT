@@ -56,7 +56,7 @@ def is_image_only_event(event: dict) -> bool:
     return has_image and not has_text_meaning
 
 
-# 请求构建器（原样保留）
+# 请求构建器
 def build_params(type, event, content):
     msg_type = event.get("message_type")
     base = ""
@@ -128,13 +128,15 @@ _DEEPSEEK_KEY = _DEEPSEEK.get("KEY")
 
 
 # 提取当前消息文本
-def _extract_text(event) -> str:
+def _extract_text(event) -> str | None:
     parts: List[str] = []
     for seg in event.get("message", []):
         if seg.get("type") == "text":
             t = seg.get("data", {}).get("text", "")
             if t:
                 parts.append(t)
+        elif seg.get("type") == "at":
+            return None
     return "".join(parts).strip()
 
 
