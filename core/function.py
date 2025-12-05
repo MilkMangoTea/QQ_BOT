@@ -1,21 +1,6 @@
-import asyncio
-import random
-import config
 from core.function_completion import *
 from core.function_memory import *
 from core.function_cmd import *
-import importlib
-import signal
-
-
-def reload_config(signum, frame):
-    """信号处理函数，重新加载配置"""
-
-    print("⏱️正在重新加载配置...")
-    # 重新加载配置模块
-    importlib.reload(config)
-
-    print(f"✅配置已重新加载")
 
 
 # 随机文字池子
@@ -23,7 +8,7 @@ def ran_rep_text_only():
     return random.choice(config.POKE)
 
 
-# 戳一戳固定文字响应
+# 固定文字响应
 def build_params_text_only(event, content):
     base = {"message": [{"type": "text", "data": {"text": content}}]}
     key = "group_id" if "group_id" in event else "user_id"
