@@ -1,3 +1,4 @@
+import asyncio
 import websockets
 import time
 from core.function import *
@@ -30,7 +31,19 @@ async def ai_completion(message, current_id):
     try:
 
         memory_pool = LocalDictStore()
-        new_message = message + dic_to_prompt_list(memory_pool.get(str(current_id)))
+        user_id = str(current_id)
+
+        last_user_text = ""
+        for m in reversed(message):
+            if m.get("role") == "user":
+                parts = m.get("content", [])
+                last_user_text = "".join(p.get("text", "") for p in parts if p.get("type") == "text")
+                break
+
+        mem_dic = memory_pool.get(user_id, query=last_user_text)
+        mem_prompt = dic_to_prompt_list(mem_dic)
+
+        new_message = message + mem_prompt
 
         # 将 LLM_NAME 视为逗号分隔的候选模型序列：先依次试这些模型，再兜底 DeepSeek
         names = [s.strip() for s in str(LLM_NAME).split(",") if s.strip()]
@@ -54,9 +67,18 @@ async def ai_completion(message, current_id):
                     messages=new_message
                 )
                 out("原始信息：", resp.choices[0].message.content)
-                print(f"✅ 使用模型: {name}")
-                content, memory_dict = solve_json(resp.choices[0].message.content)
-                memory(memory_dict, current_id, memory_pool)
+                out("✅ 使用模型：", name)
+
+                content = resp.choices[0].message.content
+
+                try:
+                    memory_pool.add_turn(
+                        user_id=user_id,
+                        user_text=last_user_text,
+                        assistant_text=content
+                    )
+                except Exception as e:
+                    print("⚠️ mem0 add_turn 失败：", e)
 
                 return content
 

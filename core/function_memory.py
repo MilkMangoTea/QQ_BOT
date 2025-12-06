@@ -1,87 +1,52 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-import re
+from typing import Dict, Optional
+from mem0 import Memory
+import config
+
+# 初始化 Mem0 客户端
+MEMORY = Memory.from_config(config.MEM0_CONFIG)
 
 class LocalDictStore:
     """
-    顶层以 record_id 分组，每个 record_id 对应一个键->值的子字典。
-    存盘格式示例：
-    {
-      "record1": { "k1": "v1", "k2": "v2" },
-      "record2": { "foo": "bar" }
-    }
+    mem0 封装：
+    - get(record_id)  -> 从 mem0 拉该用户的所有记忆，拼成一个简单的 {key: value} dict
+    - set(record_id, key, value) -> 把单条记忆写到 mem0
     """
-    def __init__(self, filepath: str = "memory_store.json"):
-        self.filepath = Path(filepath)
-        self.data: Dict[str, Dict[Any, Any]] = {}
-        if self.filepath.exists():
-            self.load()
 
-    def set(self, record_id: str, key: Any, value: Any) -> None:
-        """在 record_id 下设置或更新 key=value，并立即保存。"""
-        if record_id not in self.data:
-            self.data[record_id] = {}
-        self.data[record_id][key] = value
-        self.save()
+    def __init__(self, *args, **kwargs):
+        self.m = MEMORY
 
-    def get(self, record_id: str, key: Any = None, default: Any = None) -> Any:
-        """获取某条记录下的单个键，若不存在则返回 default。"""
-        if not key:
-            return self.data.get(record_id)
-        return self.data.get(record_id, {}).get(key, default)
-
-    def get_record(self, record_id: str) -> Dict[Any, Any]:
-        """获取整个 record_id 对应的键值字典，若不存在则返回空字典。"""
-        return dict(self.data.get(record_id, {}))
-
-    def delete(self, record_id: str, key: Optional[Any] = None) -> None:
+    def get(self, user_id: str, query: Optional[str] = None, limit: int = 3) -> Dict[str, str]:
         """
-        删除操作：
-        - 如果未指定 key，则删除整个 record_id。
-        - 否则仅删除该 record_id 下的指定 key。
+        query 有就 search；没有就 get_all
+        返回 dict 给 dic_to_prompt_list 用
         """
-        if record_id not in self.data:
-            return
-        if key is None:
-            del self.data[record_id]
+        user_id = str(user_id)
+        if query:
+            res = self.m.search(query, user_id=user_id, limit=limit)
         else:
-            self.data[record_id].pop(key, None)
-            # 如果子字典空了，也删掉这条记录
-            if not self.data[record_id]:
-                del self.data[record_id]
-        self.save()
+            res = self.m.get_all(user_id=user_id)
 
-    def list_ids(self) -> List[str]:
-        """返回所有 record_id 列表。"""
-        return list(self.data.keys())
+        items = res.get("results", []) if isinstance(res, dict) else (res or [])
+        dic: Dict[str, str] = {}
+        for i, it in enumerate(items, start=1):
+            text = it.get("memory")
+            if text:
+                dic[f"mem_{i}"] = text
+        return dic
 
-    def list_keys(self, record_id: str) -> List[str]:
-        """返回某条记录下的所有键名。"""
-        return list(self.data.get(record_id, {}).keys())
+    def add_turn(self, user_id: str, user_text: str, assistant_text: str):
+        """
+        交给 mem0 自动抽记忆
+        """
+        user_id = str(user_id)
+        messages = [
+            {"role": "user", "content": user_text},
+            {"role": "assistant", "content": assistant_text},
+        ]
+        self.m.add(messages, user_id=user_id)
 
-    def save(self) -> None:
-        """将整个 data 字典序列化到 JSON 文件。"""
-        self.filepath.write_text(
-            json.dumps(self.data, ensure_ascii=False, indent=2),
-            encoding="utf-8"
-        )
-
-    def load(self) -> None:
-        """从 JSON 文件加载到内存 data。"""
-        self.data = json.loads(self.filepath.read_text(encoding="utf-8"))
-
-    def export(self, export_path: str) -> None:
-        """导出当前 data 到指定 JSON 文件（备份/迁移）。"""
-        Path(export_path).write_text(
-            json.dumps(self.data, ensure_ascii=False, indent=2),
-            encoding="utf-8"
-        )
-
-    @classmethod
-    def import_from(cls, import_path: str) -> "LocalDictStore":
-        """从已有 JSON 文件创建新的实例。"""
-        return cls(import_path)
 
 # 将字典转化为序列
 def dic_to_prompt_list(dic):
@@ -92,13 +57,3 @@ def dic_to_prompt_list(dic):
         text += f"{key}: {value}\n"
     list = [{"role": "system", "content": [{"type": "text", "text": text}]}]
     return list
-
-def memory(memory_dict, current_id, memory_pool):
-    if memory_dict is not None:
-        try:
-            current_id = str(current_id)
-            for k, v in memory_dict.items():
-                memory_pool.set(current_id, k, v)
-
-        except Exception as e:
-            print(f"⚠️ memory 错误: {e}")
