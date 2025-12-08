@@ -1,7 +1,7 @@
 from core.function_completion import *
 from core.function_memory import *
 from core.function_cmd import *
-
+import json
 
 # 随机文字池子
 def ran_rep_text_only():
