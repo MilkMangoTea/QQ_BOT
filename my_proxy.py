@@ -38,6 +38,7 @@ async def ai_completion(message, current_id):
             if m.get("role") == "user":
                 parts = m.get("content", [])
                 last_user_text = "".join(p.get("text", "") for p in parts if p.get("type") == "text")
+                last_user_text = re.sub(r"^[^:：]{1,30}\s*[:：]\s*", "", last_user_text).strip()
                 break
 
         mem_dic = memory_pool.get(user_id, query=last_user_text)
@@ -66,6 +67,7 @@ async def ai_completion(message, current_id):
                     model=name,
                     messages=new_message
                 )
+                out("🏁 历史会话:", new_message)
                 out("原始信息：", resp.choices[0].message.content)
                 out("✅ 使用模型：", name)
 
@@ -122,7 +124,6 @@ async def remember(websocket, event):
         msg_type = event.get("message_type")
         message = event.get("message")
         nickname = event.get("sender").get("nickname")
-        temp_msg = nickname + ":"
         current_id = ""
         if msg_type == "group":
             current_id = event["group_id"]
@@ -138,32 +139,10 @@ async def remember(websocket, event):
             return
         last_update_time[current_id] = time.time()
 
-        # 提取对话
-        for log in message:
-            if log["type"] == "text":
-                temp_msg += log["data"]["text"]
-            elif log["type"] == "at":
-                if int(log.get("data").get("qq")) == config.SELF_USER_ID:
-                    target_prompt = "(系统提示:对方想和你说话)"
-                else:
-                    target_prompt = "(系统提示:对方在和其他人说话)"
-                temp_msg += target_prompt
-            elif log["type"] == "image":
-                if CURRENT_LLM != config.LLM["AIZEX"]:
-                    out("🛑 识图功能已关闭", 404)
-                    continue
-                image_base64 = url_to_base64(log["data"]["url"])
-                if image_base64:
-                    handle_pool[current_id].append(
-                        {"role": "user", "content": [{"type": "image_url", "image_url": {"url": image_base64}}]})
-                    out("✅ 新输入:", "[图片]")
-                else:
-                    handle_pool[current_id].append(
-                        {"role": "user", "content": [{"type": "text", "text": "(系统提示: 图片获取失败)"}]})
-
-        if temp_msg != nickname + ":":
-            handle_pool[current_id].append({"role": "user", "content": [{"type": "text", "text": temp_msg}]})
-            out("✅ 新输入:", temp_msg)
+        msgs = process_single_message(message, nickname, CURRENT_LLM)
+        for msg in msgs:
+            handle_pool[current_id].append(msg)
+            out("💾 新输入:", msg)
 
 
     except KeyError as e:
@@ -189,7 +168,6 @@ async def handle_message(websocket, event):
 
         if content:
             handle_pool[current_id].append({"role": "assistant", "content": [{"type": "text", "text": content}]})
-        out("🏁 历史会话:", handle_pool[current_id])
 
         # 构造并发送API请求
         await send_message(websocket, build_params("text", event, content))

@@ -75,40 +75,13 @@ async def get_nearby_message(websocket, event, llm):
         }))
         response = await websocket.recv()
         data = json.loads(response)
+
         res = []
         if data.get("status") == "ok":
             messages = data.get("data").get("messages")[-config.MESSAGE_COUNT:]
-            for log1 in messages:
-                message = log1.get("message")
-                nickname = log1.get("sender").get("nickname")
-                temp_msg = ""
-                if log1.get("user_id") != config.SELF_USER_ID:
-                    temp_msg = nickname + ":"
-                for log2 in message:
-                    if log2["type"] == "text" and log2["data"]["text"] != "":
-                        temp_msg += log2["data"]["text"]
-                    elif log2["type"] == "at":
-                        target_prompt = ""
-                        if int(log2.get("data").get("qq")) == config.SELF_USER_ID:
-                            target_prompt = "(系统提示:对方想和你说话)"
-                        else:
-                            target_prompt = "(系统提示:对方在和其他人说话)"
-                        temp_msg += target_prompt
-                    elif log2["type"] == "image" and llm == config.LLM["AIZEX"] and log1.get(
-                            "user_id") != config.SELF_USER_ID:
-                        image_base64 = url_to_base64(log2["data"]["url"])
-                        if image_base64:
-                            res.append({"role": "user",
-                                        "content": [{"type": "image_url", "image_url": {"url": image_base64}}]})
-                            out("✅ 新输入:", "[图片]")
-                        else:
-                            res.append(
-                                {"role": "user", "content": [{"type": "text", "text": "(系统提示: 图片获取失败)"}]})
-                if temp_msg != nickname + ":" and temp_msg != "":
-                    if log1.get("user_id") != config.SELF_USER_ID:
-                        res.append({"role": "user", "content": [{"type": "text", "text": temp_msg}]})
-                    else:
-                        res.append({"role": "assistant", "content": temp_msg})
+            for log in messages:
+                processed_msgs = process_single_message(log.get("message"), log.get("sender").get("nickname"), llm)
+                res.extend(processed_msgs)
             return res
 
     except Exception as e:
@@ -127,3 +100,68 @@ def solve_json(response):
         return content, None
     data = json.loads(content)
     return data.get("response"), data.get("memory")
+
+# 处理一条 CQ 消息，生成可直接塞进 handle_pool 的列表
+def process_single_message(message, nickname, llm):
+    results = []
+
+    # 拼文本
+    name = nickname or ""
+    at_prompt = ""   # 专门存放 @ 生成的提示（昵称和冒号之间）
+    text_body = ""   # 普通文字都拼到这里
+
+    for log in message:
+        log_type = log.get("type")
+        data = log.get("data", {})
+        # 文本
+        if log_type == "text":
+            txt = data.get("text") or ""
+            if txt:
+                text_body += txt
+        # @
+        elif log_type == "at":
+            qq = int(data.get("qq", 0))
+
+            if qq == config.SELF_USER_ID:
+                target_prompt = "(系统提示:对方想和你说话)"
+            else:
+                target_prompt = "(系统提示:对方在和其他人说话)"
+            # 放到昵称和冒号之间
+            at_prompt += target_prompt
+        # 图片
+        elif log_type == "image":
+            if llm != config.LLM["AIZEX"]:
+                out("🛑 识图功能已关闭", 404)
+                continue
+
+            image_base64 = url_to_base64(data.get("url"))
+            if image_base64:
+                results.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "image_url",
+                        "image_url": {"url": image_base64}
+                    }]
+                })
+            else:
+                results.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "text",
+                        "text": "(系统提示: 图片获取失败)"
+                    }]
+                })
+
+    if text_body or at_prompt:
+        # 昵称 + at 提示 + 冒号 + 文本
+        temp_msg = f"{name}{at_prompt}:{text_body}"
+        if temp_msg != name + ":":
+            results.append({
+                "role": "user",
+                "content": [{
+                    "type": "text",
+                    "text": temp_msg
+                }]
+            })
+
+    return results

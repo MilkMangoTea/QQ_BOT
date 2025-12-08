@@ -1,5 +1,4 @@
-import json
-from pathlib import Path
+import re
 from typing import Dict, Optional
 from mem0 import Memory
 import config
@@ -36,11 +35,10 @@ class LocalDictStore:
                 dic[f"mem_{i}"] = text
         return dic
 
+    # mem0 自动抽记忆
     def add_turn(self, user_id: str, user_text: str, assistant_text: str):
-        """
-        交给 mem0 自动抽记忆
-        """
         user_id = str(user_id)
+        user_text = re.sub(r"^[^:：]{1,30}\s*[:：]\s*", "", user_text).strip()
         messages = [
             {"role": "user", "content": user_text},
             {"role": "assistant", "content": assistant_text},
