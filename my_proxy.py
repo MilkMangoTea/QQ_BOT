@@ -51,11 +51,6 @@ async def ai_completion(message, current_id):
         names = [s.strip() for s in str(LLM_NAME).split(",") if s.strip()]
         cands = [(name, LLM_BASE_URL, LLM_KEY) for name in names]
 
-        # 兜底：DeepSeek-V3（若当前就已是 DeepSeek 则不会多加）
-        dsv3 = config.LLM["DEEPSEEK-V3"]
-        if not (LLM_BASE_URL == dsv3["URL"] and LLM_KEY == dsv3["KEY"] and any(n == dsv3["NAME"] for n in names)):
-            cands.append((dsv3["NAME"], dsv3["URL"], dsv3["KEY"]))
-
         last_err = None
         for name, url, key in cands:
             try:
