@@ -139,10 +139,12 @@ def process_single_message(message, nickname, llm):
             if image_base64:
                 results.append({
                     "role": "user",
-                    "content": [{
-                        "type": "image_url",
-                        "image_url": {"url": image_base64}
-                    }]
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}
+                        }
+                    ]
                 })
             else:
                 results.append({
