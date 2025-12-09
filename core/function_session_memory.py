@@ -7,76 +7,112 @@ from langchain_core.chat_history import BaseChatMessageHistory
 
 
 @dataclass
+# 单个会话的短期记忆容器
 class SessionMemory:
-    """
-    单个会话的短期记忆容器，封装 LangChain 的 ChatMessageHistory，
-    并记录最近一次更新的时间戳，方便做超时清理 / 过期重置。
-    """
     history: BaseChatMessageHistory = field(default_factory=ChatMessageHistory)
     last_update_time: float = field(default_factory=time.time)
+    is_initialized: bool = False
 
     def touch(self) -> None:
         self.last_update_time = time.time()
 
     def is_expired(self, timeout: Optional[float]) -> bool:
-        """
-        根据 timeout 判断是否过期。
-        timeout 为 None 或 <=0 时，认为永不过期。
-        """
         if not timeout or timeout <= 0:
             return False
         return (time.time() - self.last_update_time) > timeout
 
-
+# 全局的短期记忆管理器
 class MemoryManager:
-    """
-    全局的短期记忆管理器
-    - 通过 session_id 区分会话
-    - 内部为每个会话维护一个 SessionMemory（底层是 ChatMessageHistory）
-    - 提供：
-        * get_or_create_session          拿到某个会话的 SessionMemory
-        * get_history                    拿到 BaseChatMessageHistory（给 RunnableWithMessageHistory 用）
-        * add_user_message / add_ai_message  追加用户 / 机器人消息
-        * get_recent_dialog_lines        取最近 N 条对话，格式化成字符串列表（给判定链用）
-        * reset_session / drop_session   手动重置 / 删除某个会话
-    """
-
-    def __init__(self, timeout: Optional[float] = None):
+    def __init__(
+            self,
+            timeout: Optional[float] = None,
+            context_window: int = 15  # 提供给 LLM 的最大消息数
+    ):
         """
-        :param timeout: 会话超时时间（秒）；超过则认为过期，下次访问时会重建 SessionMemory。
+        :param timeout: 会话超时时间（秒）
+        :param context_window: 提供给 LLM 的最大消息数
         """
         self._timeout = timeout
+        self._context_window = context_window
         self._sessions: Dict[str, SessionMemory] = {}
 
-    # 会话基础操作
-
-    # 获取某个 session 的 SessionMemory；不存在或已过期则重建。
+    # 获取或创建会话
     def get_or_create_session(self, session_id: str) -> SessionMemory:
+
         session = self._sessions.get(session_id)
 
-        if session is None or session.is_expired(self._timeout):
+        # 会话过期处理：直接清空
+        if session is not None and session.is_expired(self._timeout):
+            print(f"⏰ 会话 {session_id} 已过期，清空记忆")
+            session = None
+
+        # 创建新会话
+        if session is None:
             session = SessionMemory()
             self._sessions[session_id] = session
+            print(f"🆕 创建新会话: {session_id}")
 
         session.touch()
         return session
 
-    # 直接拿指定 session 的 ChatMessageHistory。
+    def initialize_with_history(
+            self,
+            session_id: str,
+            messages: List[Dict],
+            force: bool = False
+    ) -> None:
+        session = self.get_or_create_session(session_id)
+
+        # 如果已经初始化且不强制，跳过
+        if session.is_initialized and not force:
+            return
+
+        # 清空现有历史
+        session.history.clear()
+
+        # 填充历史消息
+        for msg in messages[-self._context_window:]:  # 只取最近的 N 条
+            role = msg.get("role")
+            content = msg.get("content", [])
+
+            # 提取文本内容
+            text_parts = []
+            for part in content:
+                if isinstance(part, dict):
+                    if part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                    elif part.get("type") == "image_url":
+                        text_parts.append("[图片]")
+
+            text = "".join(text_parts).strip()
+            if not text:
+                continue
+
+            # 添加到历史
+            if role == "user":
+                session.history.add_user_message(text)
+            elif role == "assistant":
+                session.history.add_ai_message(text)
+
+        session.is_initialized = True
+        print(f"📚 会话 {session_id} 已初始化，加载了 {len(messages)} 条历史")
+
     def get_history(self, session_id: str) -> BaseChatMessageHistory:
-        return self.get_or_create_session(session_id).history
+        session = self.get_or_create_session(session_id)
 
-    # 强制重置某个 session 的记忆。返回新的 SessionMemory。
-    def reset_session(self, session_id: str) -> SessionMemory:
-        session = SessionMemory()
-        self._sessions[session_id] = session
-        return session
+        all_messages = session.history.messages
 
-    # 丢弃某个 session 的记忆
-    def drop_session(self, session_id: str) -> None:
-        self._sessions.pop(session_id, None)
+        # 如果消息数不超过限制，直接返回
+        if len(all_messages) <= self._context_window:
+            return session.history
 
-    # 追加消息
-    # 往指定会话追加一条用户消息。
+        # 裁剪：只保留最近的消息
+        limited_history = ChatMessageHistory()
+        for msg in all_messages[-self._context_window:]:
+            limited_history.add_message(msg)
+
+        return limited_history
+
     def add_user_message(self, session_id: str, text: str) -> None:
         if not text:
             return
@@ -91,26 +127,19 @@ class MemoryManager:
         session.history.add_ai_message(text)
         session.touch()
 
-    # 提供给判定链使用的上下文
     def get_recent_dialog_lines(
             self,
             session_id: str,
             take_n: int = 10,
             max_chars_per_line: int = 240,
     ) -> List[str]:
-        """
-        从指定会话中取出最近 N 条消息，转成“单行文本列表”。
-        设计上是给 should_reply_langchain 用的：
-        - human 消息：原样输出（去首尾空白）
-        - ai 消息：前面加 "BOT: "
-        - 对每一条做 max_chars_per_line 截断
-        """
+        # 获取最近的对话
         session = self.get_or_create_session(session_id)
         messages = session.history.messages[-take_n:]
 
         lines: List[str] = []
         for msg in messages:
-            role = getattr(msg, "type", "")  # "human" / "ai" / "system" ...
+            role = getattr(msg, "type", "")
             content = (getattr(msg, "content", "") or "").strip()
 
             if not content:
@@ -128,28 +157,32 @@ class MemoryManager:
 
         return lines
 
-    # 管理工具-
-    # 主动清理已过期的会话。
-    def cleanup_expired(self) -> None:
-        if not self._timeout or self._timeout <= 0:
-            return
+    # 检查会话是否已初始化
+    def is_session_initialized(self, session_id: str) -> bool:
+        session = self._sessions.get(session_id)
+        return session is not None and session.is_initialized
 
-        now = time.time()
-        to_delete = [
-            sid
-            for sid, session in self._sessions.items()
-            if (now - session.last_update_time) > self._timeout
-        ]
-        for sid in to_delete:
-            self._sessions.pop(sid, None)
+    # 手动重置会话
+    def reset_session(self, session_id: str) -> SessionMemory:
+        session = SessionMemory()
+        self._sessions[session_id] = session
+        print(f"🔄 手动重置会话: {session_id}")
+        return session
+    # 获取会话统计信息（调试用）
+    def get_stats(self, session_id: str) -> dict:
+        session = self._sessions.get(session_id)
+        if not session:
+            return {"exists": False}
+        return {
+            "exists": True,
+            "active_messages": len(session.history.messages),
+            "is_initialized": session.is_initialized,
+            "is_expired": session.is_expired(self._timeout),
+            "age_seconds": time.time() - session.last_update_time
+        }
 
-
-# session_id 计算工具
+# 计算会话 ID
 def calc_session_id(event: dict) -> str:
-    """
-    - 群聊:  "group:<group_id>"
-    - 私聊:  "user:<user_id>"
-    """
     msg_type = event.get("message_type")
 
     if msg_type == "group":

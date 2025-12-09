@@ -12,25 +12,19 @@ LLM_NAME = CURRENT_LLM["NAME"]
 LLM_BASE_URL = CURRENT_LLM["URL"]
 LLM_KEY = CURRENT_LLM["KEY"]
 
-client = OpenAI(
-    api_key=LLM_KEY,
-    base_url=LLM_BASE_URL,
-    timeout=15.0,  # 快失败：整体 15 秒超时
-    max_retries=0,  # 不做 SDK 重试
-    http_client=HTTP_CLIENT,
-)
-
 template_ask_messages = [
     {"role": "system", "content": [{"type": "text", "text": config.PROMPT[0] + config.PROMPT[config.CURRENT_PROMPT]}]}]
 system_prompt = config.PROMPT[0] + config.PROMPT[config.CURRENT_PROMPT]
 
 memory_pool = LocalDictStore()
-memory_manager = MemoryManager(timeout=config.HISTORY_TIMEOUT)
+memory_manager = MemoryManager(
+    timeout=config.HISTORY_TIMEOUT,
+    context_window=15
+)
 
 
 # 大模型请求器(注意message不能为空!)
 async def ai_completion(session_id, user_input):
-    """使用 LangChain chain 生成回复，支持多模型重试"""
     try:
         user_id = session_id.split(":", 1)[-1] if ":" in session_id else session_id
 
@@ -128,6 +122,13 @@ async def remember(websocket, event):
     try:
         session_id = calc_session_id(event)
 
+        # 如果会话未初始化，先拉取历史
+        if not memory_manager.is_session_initialized(session_id):
+            print(f"🔍 首次记忆，正在拉取历史消息...")
+            history_msgs = await get_nearby_message(websocket, event, CURRENT_LLM)
+            if history_msgs:
+                memory_manager.initialize_with_history(session_id, history_msgs)
+
         message = event.get("message")
         nickname = event.get("sender").get("nickname")
 
@@ -157,7 +158,6 @@ async def remember(websocket, event):
 
 # 处理消息事件并发送回复
 async def handle_message(websocket, event):
-    """处理消息事件并发送回复"""
     try:
         from core.function import calc_session_id
         session_id = calc_session_id(event)
@@ -165,7 +165,7 @@ async def handle_message(websocket, event):
         msg_type = event.get("message_type")
         out("⏳ 当前会话:", session_id)
 
-        # 从 event 提取用户输入（remember 已经加入记忆，这里只需提取文本）
+        # 从 event 提取用户输入（remember 已经加入记忆，这里只提取文本）
         message = event.get("message")
         nickname = event.get("sender").get("nickname")
         msgs = process_single_message(message, nickname, CURRENT_LLM)
@@ -223,7 +223,6 @@ async def qq_bot():
 
                 my_event = special_event(event)
                 if my_event:
-
                     # /s img/图片
                     if isinstance(my_event, dict) and my_event.get("message"):
                         await send_message(ws, my_event)
@@ -231,6 +230,13 @@ async def qq_bot():
 
                     # /s 群聊|私聊 <ID>
                     session_id = calc_session_id(my_event)
+
+                    # 🔥 关键：如果会话未初始化，先拉取历史
+                    if not memory_manager.is_session_initialized(session_id):
+                        print(f"🔍 首次记忆，正在拉取历史消息...")
+                        history_msgs = await get_nearby_message(ws, event, CURRENT_LLM)
+                        if history_msgs:
+                            memory_manager.initialize_with_history(session_id, history_msgs)
 
                     message = my_event.get("message")
                     nickname = my_event.get("sender", {}).get("nickname", "")
