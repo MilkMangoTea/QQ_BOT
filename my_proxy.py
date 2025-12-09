@@ -28,11 +28,12 @@ last_update_time = {}
 memory_pool = LocalDictStore()
 memory_manager = MemoryManager(timeout=config.HISTORY_TIMEOUT)
 
-# 大模型请求器(注意message不能为空，deepseek的assistant里面不能有text!)
+# 大模型请求器(注意message不能为空!)
 async def ai_completion(message, current_id):
     try:
         user_id = str(current_id)
 
+        # 提取最后一条用户消息文本
         last_user_text = ""
         for m in reversed(message):
             if m.get("role") == "user":
@@ -41,35 +42,37 @@ async def ai_completion(message, current_id):
                 last_user_text = re.sub(r"^[^:：]{1,30}\s*[:：]\s*", "", last_user_text).strip()
                 break
 
+        # 获取长期记忆
         mem_dic = memory_pool.get(user_id, query=last_user_text)
         mem_prompt = dic_to_prompt_list(mem_dic)
-
         new_message = message + mem_prompt
 
-        # 将 LLM_NAME 视为逗号分隔的候选模型序列：先依次试这些模型，再兜底 DeepSeek
-        names = [s.strip() for s in str(LLM_NAME).split(",") if s.strip()]
-        cands = [(name, LLM_BASE_URL, LLM_KEY) for name in names]
+        # 转换为 LangChain 消息格式
+        lc_messages = convert_openai_to_langchain(new_message)
 
+        # 尝试多个候选模型
+        names = [s.strip() for s in str(LLM_NAME).split(",") if s.strip()]
         last_err = None
-        for name, url, key in cands:
+
+        for name in names:
             try:
-                # 复用默认 client（相同 base_url/key），否则临时建一个
-                cli = client if (url == LLM_BASE_URL and key == LLM_KEY) else OpenAI(
-                    api_key=key, base_url=url, timeout=40.0, max_retries=2, http_client=HTTP_CLIENT
-                )
-                resp = await asyncio.to_thread(
-                    cli.chat.completions.create,
-                    model=name,
-                    messages=new_message
-                )
+                # 为每个模型创建 LLM 实例
+                temp_config = CURRENT_LLM.copy()
+                temp_config["NAME"] = name
+                llm = create_chat_llm(temp_config)
+
+                # 调用 LangChain LLM
+                response = await asyncio.to_thread(llm.invoke, lc_messages)
+                content = response.content
+
                 out("🏁 历史会话:", new_message)
-                out("原始信息：", resp.choices[0].message.content)
+                out("原始信息：", content)
                 out("✅ 使用模型：", name)
 
-                content = resp.choices[0].message.content
-                if content is None or content == "":
+                if not content:
                     content = "嗯"
 
+                # 异步添加长期记忆
                 try:
                     asyncio.create_task(
                         asyncio.to_thread(
@@ -88,13 +91,11 @@ async def ai_completion(message, current_id):
                 last_err = e
                 continue
 
-        print(f"⚠️ 调用 OpenAI API 发生错误(全部候选失败): {last_err}")
+        print(f"⚠️ 调用 LLM 发生错误(全部候选失败): {last_err}")
         return None
 
     except Exception as e:
-        # 捕获异常并打印错误信息
-        print(f"⚠️ 调用 OpenAI API 发生错误: {e}")
-
+        print(f"⚠️ 调用 LLM 发生错误: {e}")
         return None
 
 

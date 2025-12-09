@@ -6,6 +6,7 @@ import httpx
 from typing import Any, Dict, List
 import config
 
+
 # 请求构建器
 def build_params(type, event, content):
     msg_type = event.get("message_type")
@@ -65,12 +66,15 @@ def url_to_base64(url, timeout=(5, 20)):
         print(f"⚠️ 处理异常: {e}")
     return None
 
+
 # ===== LangChain 相关 =====
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate
 from langchain_core.caches import InMemoryCache
 from langchain_core.globals import set_llm_cache
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+
 
 _IMG_TYPES = {"image", "img", "photo", "picture", "sticker"}
 
@@ -114,7 +118,23 @@ def is_image_only_event(event: dict) -> bool:
 
     return has_image and not has_text_meaning
 
+# 把 OpenAI 格式消息转换为 LangChain 格式
+def convert_openai_to_langchain(messages):
+    result = []
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content", [])
 
+        if role == "system":
+            text = "".join(p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text")
+            result.append(SystemMessage(content=text))
+        elif role == "user":
+            result.append(HumanMessage(content=content))
+        elif role == "assistant":
+            text = "".join(p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text")
+            result.append(AIMessage(content=text))
+
+    return result
 
 
 # 轻量 httpx Client
@@ -151,18 +171,18 @@ class Decision(BaseModel):
 
 # few-shot 示例
 _EXAMPLES = [
-  {
-    "input": "上下文: 在聊代理设置。 当前消息: Mac上怎么全局代理？",
-    "output": {"should_reply": True, "category": "QUESTION", "confidence": 0.9}
-  },
-  {
-    "input": "上下文: 机器人刚给了步骤。 当前消息: 证书在哪导入？",
-    "output": {"should_reply": True, "category": "FOLLOWUP", "confidence": 0.9}
-  },
-  {
-    "input": "上下文: 无。 当前消息: ？？？",
-    "output": {"should_reply": False, "category": "NOISE", "confidence": 0.85}
-  }
+    {
+        "input": "上下文: 在聊代理设置。 当前消息: Mac上怎么全局代理？",
+        "output": {"should_reply": True, "category": "QUESTION", "confidence": 0.9}
+    },
+    {
+        "input": "上下文: 机器人刚给了步骤。 当前消息: 证书在哪导入？",
+        "output": {"should_reply": True, "category": "FOLLOWUP", "confidence": 0.9}
+    },
+    {
+        "input": "上下文: 无。 当前消息: ？？？",
+        "output": {"should_reply": False, "category": "NOISE", "confidence": 0.85}
+    }
 ]
 _example_prompt = ChatPromptTemplate.from_messages([
     ("human", "{input}"),
@@ -217,7 +237,6 @@ _RULES_TEXT = """
 - 综合后在 0~1 内给出合理分值。
 """
 
-
 _PROMPT = ChatPromptTemplate.from_messages([
     ("system", "{rules}"),
     _FEWSHOT,
@@ -225,9 +244,21 @@ _PROMPT = ChatPromptTemplate.from_messages([
      "【群聊最近上下文】\n{ctx}\n\n"
      "【当前消息】\n{user_message}\n"
      "只返回 JSON。"
-    ),
+     ),
 ]).partial(rules=_RULES_TEXT)
 
+# 供外部调用
+def create_chat_llm(llm_config):
+    """根据配置创建 ChatOpenAI 实例"""
+    return ChatOpenAI(
+        model=llm_config["NAME"],
+        api_key=llm_config["KEY"],
+        base_url=llm_config["URL"],
+        temperature=0.7,
+        timeout=15.0,
+        max_retries=0,
+        http_client=HTTP_CLIENT,
+    )
 
 def _make_llm():
     if not (_DEEPSEEK_NAME and _DEEPSEEK_URL and _DEEPSEEK_KEY):
@@ -241,7 +272,9 @@ def _make_llm():
         max_retries=2,
     )
 
+
 set_llm_cache(InMemoryCache())
+
 
 def _decision_chain():
     llm = _make_llm()
@@ -249,7 +282,7 @@ def _decision_chain():
 
 
 # LangChain 判定
-def should_reply_langchain(event: Dict[str, Any], handle_pool_whole) -> bool:
+def should_reply_langchain(event: Dict[str, Any], memory_manager, session_id: str) -> bool:
     """
     - 图片-only：直接 False（仅依据分段 type）
     - 无文本：直接 False
@@ -266,38 +299,8 @@ def should_reply_langchain(event: Dict[str, Any], handle_pool_whole) -> bool:
     if not curr_text:
         return False
 
-    # 最近上下文
-    take_n = 10
-    ctx_lines: List[str] = []
-    gid = str(event.get("group_id"))
-    handle_pool = (handle_pool_whole or {}).get(gid)
-
-    if handle_pool:
-        for item in list(handle_pool)[-take_n:]:
-            role = (item.get("role") or "").lower() if isinstance(item, dict) else ""
-            text_line = ""
-            if isinstance(item, dict):
-                if isinstance(item.get("content"), list):
-                    parts = []
-                    for seg in item["content"]:
-                        if isinstance(seg, dict) and seg.get("type") == "text":
-                            t = seg.get("text") or ""
-                            if t:
-                                parts.append(t)
-                    text_line = "".join(parts).strip()
-                else:
-                    text_line = (item.get("text") or "").strip()
-            else:
-                text_line = str(item).strip()
-
-            if not text_line:
-                continue
-
-            line = f"BOT: {text_line}" if role == "assistant" else text_line
-            if len(line) > 240:
-                line = line[:240] + "…"
-            ctx_lines.append(line)
-
+    # 从 MemoryManager 获取最近上下文
+    ctx_lines = memory_manager.get_recent_dialog_lines(session_id, take_n=10, max_chars_per_line=240)
     ctx = "\n".join(ctx_lines) if ctx_lines else "（无）"
 
     try:

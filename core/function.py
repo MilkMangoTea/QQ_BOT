@@ -32,7 +32,7 @@ def be_atted(event):
 
 
 # 条件回复(随机回复，被@，管理员发言，私聊)
-def rep(event, handle_pool):
+def rep(event, memory_manager):
     if event.get("message_type") == "group" and event.get("group_id") not in config.ALLOWED_GROUPS:
         return False
 
@@ -40,7 +40,8 @@ def rep(event, handle_pool):
         return True
 
     try:
-        return should_reply_langchain(event, handle_pool)
+        session_id = calc_session_id(event)
+        return should_reply_langchain(event, memory_manager, session_id)
     except Exception as e:
         print(f"⚠️ [rep] ZHIPU 调用异常: {e}")
         return False
@@ -87,20 +88,6 @@ async def get_nearby_message(websocket, event, llm):
 
     except Exception as e:
         print("⚠️ 获取群聊消息时发生错误:", str(e))
-
-
-# 处理 json 格式的回复
-def solve_json(response):
-    response = re.sub(r"Reasoning[\\s\\S]*?seconds\\s*", "", response).strip()
-    lines = response.splitlines()
-    if lines[0].startswith("```") and lines[-1].startswith("```"):
-        content = "\n".join(lines[1:-1])
-    else:
-        content = response
-    if (content[0] not in ('{', '[')) or (content[-1] not in ('}', ']')):
-        return content, None
-    data = json.loads(content)
-    return data.get("response"), data.get("memory")
 
 # 处理一条 CQ 消息，生成可直接塞进 handle_pool 的列表
 def process_single_message(message, nickname, llm):
