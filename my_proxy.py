@@ -28,15 +28,9 @@ memory_pool = LocalDictStore()
 memory_manager = MemoryManager(timeout=config.HISTORY_TIMEOUT)
 
 
-chat_chain = create_chat_chain_with_memory(
-    memory_manager=memory_manager,
-    long_memory_pool=memory_pool,
-    system_prompt=system_prompt,
-    llm_config=CURRENT_LLM
-)
-
 # 大模型请求器(注意message不能为空!)
 async def ai_completion(session_id, user_input):
+    """使用 LangChain chain 生成回复，支持多模型重试"""
     try:
         user_id = session_id.split(":", 1)[-1] if ":" in session_id else session_id
 
@@ -46,37 +40,65 @@ async def ai_completion(session_id, user_input):
         out("🏁 [ai_completion] 调用 chain, session:", session_id)
         out("📝 [ai_completion] 用户输入:", user_input[:100])
 
-        # 调用 chain（自动管理短期记忆）
-        response = await asyncio.to_thread(
-            chat_chain.invoke,
-            {"input": user_input, "long_memory": long_mem},
-            config={"configurable": {"session_id": session_id}}
-        )
+        # 解析候选模型列表
+        names = [s.strip() for s in str(LLM_NAME).split(",") if s.strip()]
 
-        # 提取回复内容
-        content = response.content if hasattr(response, 'content') else str(response)
-        if not content:
-            content = "嗯"
+        last_err = None
+        for model_name in names:
+            try:
+                # 为当前模型创建临时配置
+                temp_config = CURRENT_LLM.copy()
+                temp_config["NAME"] = model_name
 
-        out("原始信息：", content)
-
-        # 把回复加入短期记忆
-        memory_manager.add_ai_message(session_id, content)
-
-        # 异步更新长期记忆
-        try:
-            asyncio.create_task(
-                asyncio.to_thread(
-                    memory_pool.add_turn,
-                    user_id=user_id,
-                    user_text=user_input,
-                    assistant_text=content
+                # 动态创建 chain
+                chain = create_chat_chain_with_memory(
+                    memory_manager=memory_manager,
+                    long_memory_pool=memory_pool,
+                    system_prompt=system_prompt,
+                    llm_config=temp_config
                 )
-            )
-        except Exception as e:
-            print("⚠️ [ai_completion] mem0 add_turn 失败：", e)
 
-        return content
+                # 调用 chain
+                response = await asyncio.to_thread(
+                    chain.invoke,
+                    {"input": user_input, "long_memory": long_mem},
+                    config={"configurable": {"session_id": session_id}}
+                )
+
+                # 提取回复内容
+                content = response.content if hasattr(response, 'content') else str(response)
+                if not content:
+                    content = "嗯"
+
+                out("原始信息：", content)
+                out("✅ 使用模型：", model_name)
+
+                # 把回复加入短期记忆
+                memory_manager.add_ai_message(session_id, content)
+
+                # 异步更新长期记忆
+                try:
+                    asyncio.create_task(
+                        asyncio.to_thread(
+                            memory_pool.add_turn,
+                            user_id=user_id,
+                            user_text=user_input,
+                            assistant_text=content
+                        )
+                    )
+                except Exception as e:
+                    print("⚠️ [ai_completion] mem0 add_turn 失败：", e)
+
+                return content
+
+            except Exception as e:
+                last_err = e
+                print(f"⚠️ 模型 {model_name} 失败: {e}")
+                continue
+
+        # 所有模型都失败
+        print(f"⚠️ [ai_completion] 全部候选模型失败: {last_err}")
+        return None
 
     except Exception as e:
         print(f"⚠️ [ai_completion] 调用 LLM 发生错误: {e}")
