@@ -68,7 +68,7 @@ async def ai_completion(message, current_id):
                 out("✅ 使用模型：", name)
 
                 content = resp.choices[0].message.content
-                if content is None:
+                if content is None or content == "":
                     content = "嗯"
 
                 try:
