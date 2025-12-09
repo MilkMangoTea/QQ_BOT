@@ -70,10 +70,11 @@ def url_to_base64(url, timeout=(5, 20)):
 # ===== LangChain 相关 =====
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate, MessagesPlaceholder
 from langchain_core.caches import InMemoryCache
 from langchain_core.globals import set_llm_cache
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.runnables.history import RunnableWithMessageHistory
 
 
 _IMG_TYPES = {"image", "img", "photo", "picture", "sticker"}
@@ -318,3 +319,46 @@ def should_reply_langchain(event: Dict[str, Any], memory_manager, session_id: st
     except Exception as e:
         print(f"⚠️ LangChain 判定失败: {e}")
         return False
+
+
+# 创建带短期+长期记忆的对话链
+def create_chat_chain_with_memory(memory_manager, long_memory_pool, system_prompt, llm_config):
+
+    llm = create_chat_llm(llm_config)
+
+    # 定义 prompt，包含系统提示、长期记忆、短期历史、当前输入
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("system", "【相关长期记忆】\n{long_memory}"),
+        MessagesPlaceholder(variable_name="history"),
+        ("human", "{input}")
+    ])
+
+    # 构建基础 chain
+    chain = prompt | llm
+
+    # 包装成带短期记忆的 chain
+    chain_with_history = RunnableWithMessageHistory(
+        chain,
+        memory_manager.get_history,
+        input_messages_key="input",
+        history_messages_key="history",
+    )
+
+    return chain_with_history
+
+# 从长期记忆池获取相关记忆并格式化为文本
+def get_long_memory_text(long_memory_pool, user_id, query):
+
+    try:
+        mem_dic = long_memory_pool.get(user_id, query=query)
+        if not mem_dic or not isinstance(mem_dic, dict):
+            return "（无）"
+
+        lines = []
+        for key, val in mem_dic.items():
+            lines.append(f"• {key}: {val}")
+        return "\n".join(lines) if lines else "（无）"
+    except Exception as e:
+        print(f"⚠️ 获取长期记忆失败: {e}")
+        return "（无）"

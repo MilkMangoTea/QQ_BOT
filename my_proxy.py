@@ -22,80 +22,64 @@ client = OpenAI(
 
 template_ask_messages = [
     {"role": "system", "content": [{"type": "text", "text": config.PROMPT[0] + config.PROMPT[config.CURRENT_PROMPT]}]}]
-handle_pool = {}
-last_update_time = {}
+system_prompt = config.PROMPT[0] + config.PROMPT[config.CURRENT_PROMPT]
 
 memory_pool = LocalDictStore()
 memory_manager = MemoryManager(timeout=config.HISTORY_TIMEOUT)
 
-# 大模型请求器(注意message不能为空!)
-async def ai_completion(message, current_id):
-    try:
-        user_id = str(current_id)
 
-        # 提取最后一条用户消息文本
-        last_user_text = ""
-        for m in reversed(message):
-            if m.get("role") == "user":
-                parts = m.get("content", [])
-                last_user_text = "".join(p.get("text", "") for p in parts if p.get("type") == "text")
-                last_user_text = re.sub(r"^[^:：]{1,30}\s*[:：]\s*", "", last_user_text).strip()
-                break
+chat_chain = create_chat_chain_with_memory(
+    memory_manager=memory_manager,
+    long_memory_pool=memory_pool,
+    system_prompt=system_prompt,
+    llm_config=CURRENT_LLM
+)
+
+# 大模型请求器(注意message不能为空!)
+async def ai_completion(session_id, user_input):
+    try:
+        user_id = session_id.split(":", 1)[-1] if ":" in session_id else session_id
 
         # 获取长期记忆
-        mem_dic = memory_pool.get(user_id, query=last_user_text)
-        mem_prompt = dic_to_prompt_list(mem_dic)
-        new_message = message + mem_prompt
+        long_mem = get_long_memory_text(memory_pool, user_id, user_input)
 
-        # 转换为 LangChain 消息格式
-        lc_messages = convert_openai_to_langchain(new_message)
+        out("🏁 [ai_completion] 调用 chain, session:", session_id)
+        out("📝 [ai_completion] 用户输入:", user_input[:100])
 
-        # 尝试多个候选模型
-        names = [s.strip() for s in str(LLM_NAME).split(",") if s.strip()]
-        last_err = None
+        # 调用 chain（自动管理短期记忆）
+        response = await asyncio.to_thread(
+            chat_chain.invoke,
+            {"input": user_input, "long_memory": long_mem},
+            config={"configurable": {"session_id": session_id}}
+        )
 
-        for name in names:
-            try:
-                # 为每个模型创建 LLM 实例
-                temp_config = CURRENT_LLM.copy()
-                temp_config["NAME"] = name
-                llm = create_chat_llm(temp_config)
+        # 提取回复内容
+        content = response.content if hasattr(response, 'content') else str(response)
+        if not content:
+            content = "嗯"
 
-                # 调用 LangChain LLM
-                response = await asyncio.to_thread(llm.invoke, lc_messages)
-                content = response.content
+        out("原始信息：", content)
 
-                out("🏁 历史会话:", new_message)
-                out("原始信息：", content)
-                out("✅ 使用模型：", name)
+        # 把回复加入短期记忆
+        memory_manager.add_ai_message(session_id, content)
 
-                if not content:
-                    content = "嗯"
+        # 异步更新长期记忆
+        try:
+            asyncio.create_task(
+                asyncio.to_thread(
+                    memory_pool.add_turn,
+                    user_id=user_id,
+                    user_text=user_input,
+                    assistant_text=content
+                )
+            )
+        except Exception as e:
+            print("⚠️ [ai_completion] mem0 add_turn 失败：", e)
 
-                # 异步添加长期记忆
-                try:
-                    asyncio.create_task(
-                        asyncio.to_thread(
-                            memory_pool.add_turn,
-                            user_id=user_id,
-                            user_text=last_user_text,
-                            assistant_text=content
-                        )
-                    )
-                except Exception as e:
-                    print("⚠️ mem0 add_turn 失败：", e)
-
-                return content
-
-            except Exception as e:
-                last_err = e
-                continue
-
-        print(f"⚠️ 调用 LLM 发生错误(全部候选失败): {last_err}")
-        return None
+        return content
 
     except Exception as e:
-        print(f"⚠️ 调用 LLM 发生错误: {e}")
+        print(f"⚠️ [ai_completion] 调用 LLM 发生错误: {e}")
         return None
 
 
@@ -112,65 +96,78 @@ async def send_message(websocket, params):
 
     except websockets.exceptions.WebSocketException as e:
         # 捕获 WebSocket 相关异常
-        print(f"⚠️ WebSocket 错误: {e}")
+        print(f"⚠️ [send_message] WebSocket 错误: {e}")
     except Exception as e:
         # 捕获其他类型的异常
-        print(f"⚠️ 发送消息时发生错误: {e}")
-
+        print(f"⚠️ [send_message] 发送消息时发生错误: {e}")
 
 # 记忆函数
 async def remember(websocket, event):
     try:
-        # 获取消息类型和内容
-        msg_type = event.get("message_type")
+        session_id = calc_session_id(event)
+
         message = event.get("message")
         nickname = event.get("sender").get("nickname")
-        current_id = ""
-        if msg_type == "group":
-            current_id = event["group_id"]
-        elif msg_type == "private":
-            current_id = event["user_id"]
-        current_id = str(current_id)
 
-        # 遗忘策略
-        if current_id not in handle_pool or time.time() - last_update_time.get(current_id, 0) > config.HISTORY_TIMEOUT:
-            handle_pool[current_id] = template_ask_messages.copy()
-            handle_pool[current_id].extend(await get_nearby_message(websocket, event, CURRENT_LLM))
-            last_update_time[current_id] = time.time()
-            return
-        last_update_time[current_id] = time.time()
-
+        # 处理消息，提取文本
         msgs = process_single_message(message, nickname, CURRENT_LLM)
+
         for msg in msgs:
-            handle_pool[current_id].append(msg)
-            out("💾 新输入:", msg)
+            role = msg.get("role")
+            content = msg.get("content", [])
 
+            # 拼接文本内容（包括图片标记）
+            text_parts = []
+            for part in content:
+                if isinstance(part, dict):
+                    if part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                    elif part.get("type") == "image_url":
+                        text_parts.append("[图片]")
 
-    except KeyError as e:
-        print(f"⚠️ [remember]缺少必要字段: {e}")
+            text = "".join(text_parts).strip()
+            if text and role == "user":
+                memory_manager.add_user_message(session_id, text)
+                out("💾 新用户消息:", text[:80])
 
+    except Exception as e:
+        print(f"⚠️ [remember] 异常: {e}")
 
 # 处理消息事件并发送回复
 async def handle_message(websocket, event):
+    """处理消息事件并发送回复"""
     try:
-        # 获取消息类型和内容
+        from core.function import calc_session_id
+        session_id = calc_session_id(event)
+
         msg_type = event.get("message_type")
-        current_id = ""
-        if msg_type == "group":
-            current_id = event["group_id"]
-        elif msg_type == "private":
-            current_id = event["user_id"]
-        current_id = str(current_id)
+        out("⏳ 当前会话:", session_id)
 
-        out("⏳ 当前对话对象:", current_id)
+        # 从 event 提取用户输入（remember 已经加入记忆，这里只需提取文本）
+        message = event.get("message")
+        nickname = event.get("sender").get("nickname")
+        msgs = process_single_message(message, nickname, CURRENT_LLM)
 
-        # 发送请求
-        content = await ai_completion(handle_pool[current_id], current_id)
+        # 提取最后一条用户文本
+        user_input = ""
+        for msg in reversed(msgs):
+            if msg.get("role") == "user":
+                for part in msg.get("content", []):
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        user_input += part.get("text", "")
+                if user_input:
+                    break
 
-        if content:
-            handle_pool[current_id].append({"role": "assistant", "content": [{"type": "text", "text": content}]})
+        if not user_input:
+            user_input = "[无文本内容]"
 
-        # 构造并发送API请求
+        # 调用 chain 生成回复
+        content = await ai_completion(session_id, user_input)
+
+        if not content:
+            return
+
+        # 发送回复
         await send_message(websocket, build_params("text", event, content))
 
         # 随机发送表情
@@ -180,9 +177,8 @@ async def handle_message(websocket, event):
         print(f"✅ 已回复 {msg_type} 消息: {content}")
         print("#######################################")
 
-
-    except KeyError as e:
-        print(f"⚠️ [handle_message]缺少必要字段: {e}")
+    except Exception as e:
+        print(f"⚠️ [handle_message] 异常: {e}")
 
 
 async def qq_bot():
@@ -212,18 +208,32 @@ async def qq_bot():
                         continue
 
                     # /s 群聊|私聊 <ID>
-                    current_id = my_event["group_id"] if my_event["message_type"] == "group" else my_event["user_id"]
-                    if current_id not in handle_pool:
-                        handle_pool[current_id] = template_ask_messages.copy()
-                        handle_pool[current_id].extend(await get_nearby_message(ws, my_event, CURRENT_LLM))
-                        last_update_time[current_id] = time.time()
-                    content = await ai_completion(handle_pool[current_id], current_id)
+                    session_id = calc_session_id(my_event)
+
+                    message = my_event.get("message")
+                    nickname = my_event.get("sender", {}).get("nickname", "")
+                    msgs = process_single_message(message, nickname, CURRENT_LLM)
+
+                    user_input = ""
+                    for msg in reversed(msgs):
+                        if msg.get("role") == "user":
+                            for part in msg.get("content", []):
+                                if isinstance(part, dict) and part.get("type") == "text":
+                                    user_input += part.get("text", "")
+                                if user_input:
+                                    break
+
+                    # 先把消息加入记忆
+                    await remember(ws, my_event)
+
+                    # 生成回复
+                    content = await ai_completion(session_id, user_input or "...")
                     await send_message(ws, build_params("text", my_event, content))
 
                 else:
                     await remember(ws, event)
 
-                    if rep(event, handle_pool):
+                    if rep(event, memory_manager):
                         await handle_message(ws, event)
 
             except json.JSONDecodeError:

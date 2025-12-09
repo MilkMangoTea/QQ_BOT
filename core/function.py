@@ -43,7 +43,7 @@ def rep(event, memory_manager):
         session_id = calc_session_id(event)
         return should_reply_langchain(event, memory_manager, session_id)
     except Exception as e:
-        print(f"⚠️ [rep] ZHIPU 调用异常: {e}")
+        print(f"⚠️ [rep] NLP 调用异常: {e}")
         return False
 
 
