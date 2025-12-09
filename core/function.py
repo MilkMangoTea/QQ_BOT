@@ -105,6 +105,9 @@ def solve_json(response):
 # 处理一条 CQ 消息，生成可直接塞进 handle_pool 的列表
 def process_single_message(message, nickname, llm):
     results = []
+    if not message or not isinstance(message, list):
+        out("⚠️ message 无效或为空", 400)
+        return []
 
     # 拼文本
     name = nickname or ""
