@@ -1,6 +1,7 @@
 from core.function_completion import *
-from core.function_memory import *
+from core.function_long_turn_memory import *
 from core.function_cmd import *
+from core.function_session_memory import *
 import json
 
 # 随机文字池子

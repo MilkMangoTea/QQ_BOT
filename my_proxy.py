@@ -26,11 +26,12 @@ template_ask_messages = [
 handle_pool = {}
 last_update_time = {}
 
+memory_pool = LocalDictStore()
+memory_manager = MemoryManager(timeout=config.HISTORY_TIMEOUT)
+
 # 大模型请求器(注意message不能为空，deepseek的assistant里面不能有text!)
 async def ai_completion(message, current_id):
     try:
-
-        memory_pool = LocalDictStore()
         user_id = str(current_id)
 
         last_user_text = ""
@@ -72,6 +73,8 @@ async def ai_completion(message, current_id):
                 out("✅ 使用模型：", name)
 
                 content = resp.choices[0].message.content
+                if content is None:
+                    content = "嗯"
 
                 try:
                     memory_pool.add_turn(
