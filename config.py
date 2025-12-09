@@ -152,7 +152,7 @@ LLM = {
     "AIZEX": {
         "KEY": os.getenv("AIZEX"),
         "URL": "https://a1.aizex.me/v1",
-        "NAME": "gpt-4.1"
+        "NAME": "gpt-4.1,gpt-5,gpt-4.1-mini,claude-4-sonnet"
     },
     "Embedding": {
         "KEY": os.getenv("AIZEX"),
