@@ -1,6 +1,5 @@
 import asyncio
 import websockets
-import time
 from core.function import *
 from openai import OpenAI
 
@@ -72,10 +71,13 @@ async def ai_completion(message, current_id):
                     content = "嗯"
 
                 try:
-                    memory_pool.add_turn(
-                        user_id=user_id,
-                        user_text=last_user_text,
-                        assistant_text=content
+                    asyncio.create_task(
+                        asyncio.to_thread(
+                            memory_pool.add_turn,
+                            user_id=user_id,
+                            user_text=last_user_text,
+                            assistant_text=content
+                        )
                     )
                 except Exception as e:
                     print("⚠️ mem0 add_turn 失败：", e)

@@ -37,3 +37,4 @@ langchain-community>=0.2,<0.3
 faiss-cpu>=1.8
 pymilvus
 mem0ai
+asyncio
