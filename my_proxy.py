@@ -1,7 +1,7 @@
 import asyncio
 import websockets
 from core.function import *
-from openai import OpenAI
+from core.function_fortune import setup_daily_fortune_scheduler
 
 HTTPX_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=20.0)
 HTTPX_TIMEOUT = httpx.Timeout(connect=5.0, read=12.0, write=5.0, pool=5.0)
@@ -209,6 +209,16 @@ async def qq_bot():
     async with websockets.connect(config.WEBSOCKET_URI) as ws:
         print("✅ 成功连接到WebSocket服务器")
 
+        fortune_scheduler = setup_daily_fortune_scheduler(
+            websocket=ws,
+            target_groups=[
+                1029247118,
+            ],
+            push_hour=11,
+            push_minute=55,
+            theme="random"
+        )
+
         async for message in ws:
             try:
                 event = json.loads(message)
@@ -224,6 +234,7 @@ async def qq_bot():
 
                 my_event = special_event(event)
                 if my_event:
+                    continue
                     # /s img/图片
                     if isinstance(my_event, dict) and my_event.get("message"):
                         await send_message(ws, my_event)

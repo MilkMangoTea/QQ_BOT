@@ -38,3 +38,5 @@ faiss-cpu>=1.8
 pymilvus
 mem0ai
 asyncio
+pillow
+apscheduler

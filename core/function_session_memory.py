@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
+from config import SELF_USER_ID
 
 
 @dataclass
@@ -71,28 +72,46 @@ class MemoryManager:
         session.history.clear()
 
         # 填充历史消息
-        for msg in messages[-self._context_window:]:  # 只取最近的 N 条
-            role = msg.get("role")
-            content = msg.get("content", [])
+        for msg in messages[-self._context_window:]:
+            try:
+                user_id = msg.get("user_id")
+                message_content = msg.get("message", [])
 
-            # 提取文本内容
-            text_parts = []
-            for part in content:
-                if isinstance(part, dict):
-                    if part.get("type") == "text":
-                        text_parts.append(part.get("text", ""))
-                    elif part.get("type") == "image_url":
-                        text_parts.append("[图片]")
+                sender = msg.get("sender", {})
+                nickname = sender.get("nickname", "") or sender.get("card", "")
 
-            text = "".join(text_parts).strip()
-            if not text:
+                # 提取文本内容
+                text_parts = []
+                for segment in message_content:
+                    if isinstance(segment, dict):
+                        seg_type = segment.get("type")
+                        seg_data = segment.get("data", {})
+
+                        if seg_type == "text":
+                            text_parts.append(seg_data.get("text", ""))
+                        elif seg_type == "image":
+                            text_parts.append("[图片]")
+                        elif seg_type == "at":
+                            qq = seg_data.get("qq", "")
+                            if qq == SELF_USER_ID:
+                                text_parts.append(f"(系统提示:对方想和你说话)")
+                            else:
+                                text_parts.append(f"(系统提示:对方在和其他人说话)")
+                        # 可以继续添加其他类型的处理
+
+                text = "".join(text_parts).strip()
+
+                if not text:
+                    continue
+
+                if user_id == SELF_USER_ID:
+                    session.history.add_ai_message(text)
+                else:
+                    session.history.add_user_message(text)
+
+            except Exception as e:
+                print(f"⚠️ 处理历史消息失败: {e}")
                 continue
-
-            # 添加到历史
-            if role == "user":
-                session.history.add_user_message(text)
-            elif role == "assistant":
-                session.history.add_ai_message(text)
 
         session.is_initialized = True
         print(f"📚 会话 {session_id} 已初始化，加载了 {len(messages)} 条历史")
