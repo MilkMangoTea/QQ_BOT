@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw, ImageFont
 FORTUNE_PATH = Path("fortune_resources")
 IMG_PATH = FORTUNE_PATH / "img"
 FONT_PATH = FORTUNE_PATH / "font"
-COPYWRITING_PATH = FORTUNE_PATH / "fortune/copywriting.json"
+COPYWRITING_PATH = FORTUNE_PATH / "fortune" / "copywriting.json"
 OUT_PATH = FORTUNE_PATH / "out"
 
 # 启用的主题
