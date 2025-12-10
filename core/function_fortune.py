@@ -7,10 +7,10 @@ from PIL import Image, ImageDraw, ImageFont
 # ===== 配置 =====
 
 # 资源路径
-FORTUNE_PATH = Path("/opt/QQ_BOT/fortune_resources")
+FORTUNE_PATH = Path("fortune_resources")
 IMG_PATH = FORTUNE_PATH / "img"
 FONT_PATH = FORTUNE_PATH / "font"
-COPYWRITING_PATH = FORTUNE_PATH / "fortune" / "copywriting.json"
+COPYWRITING_PATH = FORTUNE_PATH / "copywriting.json"
 OUT_PATH = FORTUNE_PATH / "out"
 
 # 启用的主题
