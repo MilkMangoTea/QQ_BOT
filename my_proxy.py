@@ -215,7 +215,7 @@ async def qq_bot():
                 1029247118,
             ],
             push_hour=14,
-            push_minute=8,
+            push_minute=22,
             theme="random"
         )
 
