@@ -64,6 +64,7 @@ async def ai_completion(session_id, user_input):
                 if not content:
                     content = "嗯"
 
+                out("短期记忆：", memory_manager.get_or_create_session(session_id).history)
                 out("原始信息：", content)
                 out("✅ 使用模型：", model_name)
 
