@@ -214,8 +214,8 @@ async def qq_bot():
             target_groups=[
                 1029247118,
             ],
-            push_hour=11,
-            push_minute=55,
+            push_hour=12,
+            push_minute=0,
             theme="random"
         )
 
