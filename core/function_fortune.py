@@ -16,8 +16,8 @@ OUT_PATH = FORTUNE_PATH / "out"
 # 启用的主题
 THEME_CONFIG = {
     "hololive": {"enabled": True, "weight": 2},
-    "touhou": {"enabled": True, "weight": 3},
-    "touhou_lostword": {"enabled": True, "weight": 3},
+    "touhou": {"enabled": True, "weight": 5},
+    "touhou_lostword": {"enabled": True, "weight": 5},
     "hoshizora": {"enabled": True, "weight": 2},
     "mmt": {"enabled": True, "weight": 1},
     "gura": {"enabled": True, "weight": 4}
