@@ -7,19 +7,22 @@ from PIL import Image, ImageDraw, ImageFont
 # ===== 配置 =====
 
 # 资源路径
-FORTUNE_PATH = Path("fortune_resources")
+FORTUNE_PATH = Path("/Users/milkmangotea/Library/Mobile Documents/com~apple~CloudDocs/QQ_BOT/fortune_resources")
 IMG_PATH = FORTUNE_PATH / "img"
 FONT_PATH = FORTUNE_PATH / "font"
 COPYWRITING_PATH = FORTUNE_PATH / "copywriting.json"
 OUT_PATH = FORTUNE_PATH / "out"
 
 # 启用的主题
-ENABLED_THEMES = {
-    "hololive": True,
-    "touhou": True,
-    "touhou_lostword": True,
-    "hoshizora": True
+THEME_CONFIG = {
+    "hololive": {"enabled": True, "weight": 2},
+    "touhou": {"enabled": True, "weight": 3},
+    "touhou_lostword": {"enabled": True, "weight": 3},
+    "hoshizora": {"enabled": True, "weight": 2},
+    "mmt": {"enabled": True, "weight": 1},
+    "gura": {"enabled": True, "weight": 4}
 }
+
 
 
 # 获取运势文案
@@ -44,20 +47,24 @@ def get_copywriting() -> Tuple[str, str]:
 
 # 选择签底图
 # 获取所有可用主题
-def get_available_themes() -> List[str]:
+def get_available_themes() -> Tuple[List[str], List[int]]:
     themes = []
-    for theme, enabled in ENABLED_THEMES.items():
-        if enabled and (IMG_PATH / theme).exists():
+    weights = []
+
+    for theme, config in THEME_CONFIG.items():
+        if config.get("enabled", False) and (IMG_PATH / theme).exists():
             themes.append(theme)
-    return themes
+            weights.append(config.get("weight", 1))
+
+    return themes, weights
 
 # 随机选择一张签底图
 def random_basemap(theme: str = "random") -> Path:
     if theme == "random":
-        themes = get_available_themes()
+        themes, weights = get_available_themes()
         if not themes:
             raise ValueError("没有可用的主题")
-        theme = random.choice(themes)
+        theme = random.choices(themes, weights=weights, k=1)[0]
 
     # 获取主题文件夹
     theme_path = IMG_PATH / theme
@@ -335,4 +342,3 @@ def cleanup_old_images(days: int = 7):
                 print(f"🗑️ 清理旧图片: {file.name}")
         except:
             pass
-

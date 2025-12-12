@@ -1,5 +1,7 @@
 import asyncio
 import websockets
+
+from config import FORTUNE_GROUPS
 from core.function import *
 from core.function_fortune import setup_daily_fortune_scheduler
 
@@ -211,11 +213,9 @@ async def qq_bot():
 
         fortune_scheduler = setup_daily_fortune_scheduler(
             websocket=ws,
-            target_groups=[
-                1029247118,
-            ],
-            push_hour=14,
-            push_minute=33,
+            target_groups=FORTUNE_GROUPS,
+            push_hour=8,
+            push_minute=0,
             theme="random"
         )
 
