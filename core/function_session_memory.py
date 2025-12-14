@@ -1,0 +1,214 @@
+from __future__ import annotations
+import time
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+from langchain_community.chat_message_histories import ChatMessageHistory
+from langchain_core.chat_history import BaseChatMessageHistory
+from config import SELF_USER_ID
+
+
+@dataclass
+# 单个会话的短期记忆容器
+class SessionMemory:
+    history: BaseChatMessageHistory = field(default_factory=ChatMessageHistory)
+    last_update_time: float = field(default_factory=time.time)
+    is_initialized: bool = False
+
+    def touch(self) -> None:
+        self.last_update_time = time.time()
+
+    def is_expired(self, timeout: Optional[float]) -> bool:
+        if not timeout or timeout <= 0:
+            return False
+        return (time.time() - self.last_update_time) > timeout
+
+# 全局的短期记忆管理器
+class MemoryManager:
+    def __init__(
+            self,
+            timeout: Optional[float] = None,
+            context_window: int = 15  # 提供给 LLM 的最大消息数
+    ):
+        """
+        :param timeout: 会话超时时间（秒）
+        :param context_window: 提供给 LLM 的最大消息数
+        """
+        self._timeout = timeout
+        self._context_window = context_window
+        self._sessions: Dict[str, SessionMemory] = {}
+
+    # 获取或创建会话
+    def get_or_create_session(self, session_id: str) -> SessionMemory:
+
+        session = self._sessions.get(session_id)
+
+        # 会话过期处理：直接清空
+        if session is not None and session.is_expired(self._timeout):
+            print(f"⏰ 会话 {session_id} 已过期，清空记忆")
+            session = None
+
+        # 创建新会话
+        if session is None:
+            session = SessionMemory()
+            self._sessions[session_id] = session
+            print(f"🆕 创建新会话: {session_id}")
+
+        session.touch()
+        return session
+
+    def initialize_with_history(
+            self,
+            session_id: str,
+            messages: List[Dict],
+            force: bool = False
+    ) -> None:
+        session = self.get_or_create_session(session_id)
+
+        # 如果已经初始化且不强制，跳过
+        if session.is_initialized and not force:
+            return
+
+        # 清空现有历史
+        session.history.clear()
+
+        # 填充历史消息
+        for msg in messages[-self._context_window:]:
+            try:
+                user_id = msg.get("user_id")
+                message_content = msg.get("message", [])
+
+                sender = msg.get("sender", {})
+                nickname = sender.get("nickname", "") or sender.get("card", "")
+
+                # 提取文本内容
+                text_parts = []
+                for segment in message_content:
+                    if isinstance(segment, dict):
+                        seg_type = segment.get("type")
+                        seg_data = segment.get("data", {})
+
+                        if seg_type == "text":
+                            text_parts.append(seg_data.get("text", ""))
+                        elif seg_type == "image":
+                            text_parts.append("[图片]")
+                        elif seg_type == "at":
+                            qq = seg_data.get("qq", "")
+                            if qq == SELF_USER_ID:
+                                text_parts.append(f"(系统提示:对方想和你说话)")
+                            else:
+                                text_parts.append(f"(系统提示:对方在和其他人说话)")
+                        # 可以继续添加其他类型的处理
+
+                text = "".join(text_parts).strip()
+
+                if not text:
+                    continue
+
+                if user_id == SELF_USER_ID:
+                    session.history.add_ai_message(text)
+                else:
+                    session.history.add_user_message(text)
+
+            except Exception as e:
+                print(f"⚠️ 处理历史消息失败: {e}")
+                continue
+
+        session.is_initialized = True
+        print(f"📚 会话 {session_id} 已初始化，加载了 {len(messages)} 条历史")
+
+    def get_history(self, session_id: str) -> BaseChatMessageHistory:
+        session = self.get_or_create_session(session_id)
+
+        all_messages = session.history.messages
+
+        # 如果消息数不超过限制，直接返回
+        if len(all_messages) <= self._context_window:
+            return session.history
+
+        # 裁剪：只保留最近的消息
+        limited_history = ChatMessageHistory()
+        for msg in all_messages[-self._context_window:]:
+            limited_history.add_message(msg)
+
+        return limited_history
+
+    def add_user_message(self, session_id: str, text: str) -> None:
+        if not text:
+            return
+        session = self.get_or_create_session(session_id)
+        session.history.add_user_message(text)
+        session.touch()
+
+    def add_ai_message(self, session_id: str, text: str) -> None:
+        if not text:
+            return
+        session = self.get_or_create_session(session_id)
+        session.history.add_ai_message(text)
+        session.touch()
+
+    def get_recent_dialog_lines(
+            self,
+            session_id: str,
+            take_n: int = 10,
+            max_chars_per_line: int = 240,
+    ) -> List[str]:
+        # 获取最近的对话
+        session = self.get_or_create_session(session_id)
+        messages = session.history.messages[-take_n:]
+
+        lines: List[str] = []
+        for msg in messages:
+            role = getattr(msg, "type", "")
+            content = (getattr(msg, "content", "") or "").strip()
+
+            if not content:
+                continue
+
+            if role == "ai":
+                line = f"BOT: {content}"
+            else:
+                line = content
+
+            if max_chars_per_line and len(line) > max_chars_per_line:
+                line = line[:max_chars_per_line] + "…"
+
+            lines.append(line)
+
+        return lines
+
+    # 检查会话是否已初始化
+    def is_session_initialized(self, session_id: str) -> bool:
+        session = self._sessions.get(session_id)
+        return session is not None and session.is_initialized
+
+    # 手动重置会话
+    def reset_session(self, session_id: str) -> SessionMemory:
+        session = SessionMemory()
+        self._sessions[session_id] = session
+        print(f"🔄 手动重置会话: {session_id}")
+        return session
+    # 获取会话统计信息（调试用）
+    def get_stats(self, session_id: str) -> dict:
+        session = self._sessions.get(session_id)
+        if not session:
+            return {"exists": False}
+        return {
+            "exists": True,
+            "active_messages": len(session.history.messages),
+            "is_initialized": session.is_initialized,
+            "is_expired": session.is_expired(self._timeout),
+            "age_seconds": time.time() - session.last_update_time
+        }
+
+# 计算会话 ID
+def calc_session_id(event: dict) -> str:
+    msg_type = event.get("message_type")
+
+    if msg_type == "group":
+        gid = event.get("group_id")
+        return f"group:{gid}"
+    elif msg_type == "private":
+        uid = event.get("user_id")
+        return f"user:{uid}"
+    else:
+        raise ValueError(f"unknown message_type: {msg_type!r}, event: {event}")

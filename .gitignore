@@ -1,2 +1,14 @@
 my_env
 test.py
+NapCatInstaller.app
+requirements
+__pycache__
+.idea
+.venv
+
+*.json
+*.sh
+*.json
+*.pyc
+*.sh
+yuri_note.txt
