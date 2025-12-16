@@ -4,7 +4,7 @@ import urllib.parse
 import re
 import httpx
 from typing import Any, Dict, List
-import config
+from src.qqbot.config import config
 
 
 # 请求构建器

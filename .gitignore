@@ -1,5 +1,5 @@
 my_env
-test.py
+tests/test.py
 NapCatInstaller.app
 requirements
 __pycache__
@@ -11,4 +11,5 @@ __pycache__
 *.json
 *.pyc
 *.sh
-yuri_note.txt
+tests/yuri_note.txt
+/tests/

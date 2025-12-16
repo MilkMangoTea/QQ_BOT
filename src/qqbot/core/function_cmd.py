@@ -1,5 +1,5 @@
-import config
-from core.function_image_providers import *
+from src.qqbot.config import config
+from src.qqbot.core.function_image_providers import *
 
 def _extract_cmd_text_from_event(msg_list, prefix="/s"):
     """

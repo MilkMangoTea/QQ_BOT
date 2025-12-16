@@ -1,7 +1,7 @@
 import re
 from typing import Dict, Optional
 from mem0 import Memory
-import config
+from src.qqbot.config import config
 
 # 初始化 Mem0 客户端
 MEMORY = Memory.from_config(config.MEM0_CONFIG)

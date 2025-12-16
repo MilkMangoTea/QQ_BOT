@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
-from config import SELF_USER_ID
+from src.qqbot.config.config import SELF_USER_ID
 
 
 @dataclass
