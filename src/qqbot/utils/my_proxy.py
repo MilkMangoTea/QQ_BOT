@@ -26,15 +26,16 @@ memory_manager = MemoryManager(
 
 
 # 大模型请求器(注意message不能为空!)
-async def ai_completion(session_id, user_input):
+async def ai_completion(session_id, user_content):
     try:
         user_id = session_id.split(":", 1)[-1] if ":" in session_id else session_id
 
         # 获取长期记忆
-        long_mem = get_long_memory_text(memory_pool, user_id, user_input)
+        user_text = "".join([p.get("text", "") for p in user_content if p.get("type") == "text"])
+        long_mem = get_long_memory_text(memory_pool, user_id, user_text)
 
         out("🏁 [ai_completion] 调用 chain, session:", session_id)
-        out("📝 [ai_completion] 用户输入:", user_input[:100])
+        out("📝 [ai_completion] 用户输入:", str(user_content)[:100])
 
         # 解析候选模型列表
         names = [s.strip() for s in str(LLM_NAME).split(",") if s.strip()]
@@ -57,7 +58,7 @@ async def ai_completion(session_id, user_input):
                 # 调用 chain
                 response = await asyncio.to_thread(
                     chain.invoke,
-                    {"input": user_input, "long_memory": long_mem},
+                    {"input": user_content, "long_memory": long_mem},
                     config={"configurable": {"session_id": session_id}}
                 )
 
@@ -79,7 +80,7 @@ async def ai_completion(session_id, user_input):
                         asyncio.to_thread(
                             memory_pool.add_turn,
                             user_id=user_id,
-                            user_text=user_input,
+                            user_text=user_text,
                             assistant_text=content
                         )
                     )
@@ -174,20 +175,17 @@ async def handle_message(websocket, event):
         msgs = process_single_message(message, nickname, CURRENT_LLM)
 
         # 提取最后一条用户文本
-        user_input = ""
+        user_content = None
         for msg in reversed(msgs):
             if msg.get("role") == "user":
-                for part in msg.get("content", []):
-                    if isinstance(part, dict) and part.get("type") == "text":
-                        user_input += part.get("text", "")
-                if user_input:
-                    break
+                user_content = msg.get("content", [])
+                break
 
-        if not user_input:
-            user_input = "[无文本内容]"
+        if not user_content:
+            user_content = [{"type": "text", "text": "[无文本内容]"}]
 
         # 调用 chain 生成回复
-        content = await ai_completion(session_id, user_input)
+        content = await ai_completion(session_id, user_content)
 
         if not content:
             return
