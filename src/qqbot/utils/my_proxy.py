@@ -59,7 +59,7 @@ async def ai_completion(session_id, user_content):
                 # 调用 chain
                 response = await asyncio.to_thread(
                     chain.invoke,
-                    {"input": user_content, "long_memory": long_mem},
+                    {"input": user_text, "long_memory": long_mem},
                     config={"configurable": {"session_id": session_id}}
                 )
 
@@ -233,40 +233,6 @@ async def qq_bot():
                 my_event = special_event(event)
                 if my_event:
                     continue
-                    # /s img/图片
-                    if isinstance(my_event, dict) and my_event.get("message"):
-                        await send_message(ws, my_event)
-                        continue
-
-                    # /s 群聊|私聊 <ID>
-                    session_id = calc_session_id(my_event)
-
-                    # 🔥 关键：如果会话未初始化，先拉取历史
-                    if not memory_manager.is_session_initialized(session_id):
-                        print(f"🔍 首次记忆，正在拉取历史消息...")
-                        history_msgs = await get_nearby_message(ws, event, CURRENT_LLM)
-                        if history_msgs:
-                            memory_manager.initialize_with_history(session_id, history_msgs)
-
-                    message = my_event.get("message")
-                    nickname = my_event.get("sender", {}).get("nickname", "")
-                    msgs = process_single_message(message, nickname, CURRENT_LLM)
-
-                    user_input = ""
-                    for msg in reversed(msgs):
-                        if msg.get("role") == "user":
-                            for part in msg.get("content", []):
-                                if isinstance(part, dict) and part.get("type") == "text":
-                                    user_input += part.get("text", "")
-                                if user_input:
-                                    break
-
-                    # 先把消息加入记忆
-                    await remember(ws, my_event)
-
-                    # 生成回复
-                    content = await ai_completion(session_id, user_input or "...")
-                    await send_message(ws, build_params("text", my_event, content))
 
                 else:
                     await remember(ws, event)
