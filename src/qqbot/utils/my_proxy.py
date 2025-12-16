@@ -4,6 +4,7 @@ from src.qqbot.core.function import *
 from src.qqbot.config.config import *
 from src.qqbot.core.function_fortune import setup_daily_fortune_scheduler
 from src.qqbot.core.function_long_turn_memory import LocalDictStore
+from src.qqbot.core.function_session_memory import calc_session_id
 
 HTTPX_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=20.0)
 HTTPX_TIMEOUT = httpx.Timeout(connect=5.0, read=12.0, write=5.0, pool=5.0)
@@ -163,7 +164,6 @@ async def remember(websocket, event):
 # 处理消息事件并发送回复
 async def handle_message(websocket, event):
     try:
-        from src.qqbot.core import calc_session_id
         session_id = calc_session_id(event)
 
         msg_type = event.get("message_type")
