@@ -120,10 +120,6 @@ def process_single_message(message, nickname, llm):
             at_prompt += target_prompt
         # 图片
         elif log_type == "image":
-            if llm != config.LLM["AIZEX"]:
-                out("🛑 识图功能已关闭", 404)
-                continue
-
             image_base64 = url_to_base64(data.get("url"))
             if image_base64:
                 results.append({

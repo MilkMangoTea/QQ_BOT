@@ -71,50 +71,74 @@ class MemoryManager:
         # 清空现有历史
         session.history.clear()
 
-        # 填充历史消息
+        # 填充历史消息（支持多模态）
+        from langchain_core.messages import HumanMessage, AIMessage
+        from src.qqbot.core.function_completion import url_to_base64
+
         for msg in messages[-self._context_window:]:
             try:
                 user_id = msg.get("user_id")
                 message_content = msg.get("message", [])
-
                 sender = msg.get("sender", {})
                 nickname = sender.get("nickname", "") or sender.get("card", "")
 
-                # 提取文本内容
-                text_parts = []
+                # 构建多模态内容列表
+                content_parts = []
+                text_parts = []  # 用于拼接文本
+
                 for segment in message_content:
                     if isinstance(segment, dict):
                         seg_type = segment.get("type")
                         seg_data = segment.get("data", {})
 
                         if seg_type == "text":
-                            text_parts.append(seg_data.get("text", ""))
+                            text = seg_data.get("text", "")
+                            text_parts.append(text)
                         elif seg_type == "image":
-                            text_parts.append("[图片]")
+                            # 转换图片为 base64
+                            image_url = seg_data.get("url")
+                            if image_url:
+                                image_base64 = url_to_base64(image_url)
+                                if image_base64:
+                                    content_parts.append({
+                                        "type": "image_url",
+                                        "image_url": {"url": image_base64}
+                                    })
+                                else:
+                                    text_parts.append("[图片获取失败]")
+                            else:
+                                text_parts.append("[图片]")
                         elif seg_type == "at":
                             qq = seg_data.get("qq", "")
                             if qq == SELF_USER_ID:
-                                text_parts.append(f"(系统提示:对方想和你说话)")
+                                text_parts.append("(系统提示:对方想和你说话)")
                             else:
-                                text_parts.append(f"(系统提示:对方在和其他人说话)")
-                        # 可以继续添加其他类型的处理
+                                text_parts.append("(系统提示:对方在和其他人说话)")
 
-                text = "".join(text_parts).strip()
+                # 拼接文本部分
+                if text_parts:
+                    full_text = f"{nickname}:{''.join(text_parts)}"
+                    content_parts.insert(0, {"type": "text", "text": full_text})
 
-                if not text:
+                if not content_parts:
                     continue
 
+                # 判断是用户还是机器人
                 if user_id == SELF_USER_ID:
-                    session.history.add_ai_message(text)
+                    # 机器人的消息只保存文本
+                    text_only = "".join(p.get("text", "") for p in content_parts if p.get("type") == "text")
+                    if text_only:
+                        session.history.add_message(AIMessage(content=text_only))
                 else:
-                    session.history.add_user_message(text)
+                    # 用户消息保存多模态内容
+                    session.history.add_message(HumanMessage(content=content_parts))
 
             except Exception as e:
                 print(f"⚠️ 处理历史消息失败: {e}")
                 continue
 
         session.is_initialized = True
-        print(f"📚 会话 {session_id} 已初始化，加载了 {len(messages)} 条历史")
+        print(f"✅ 会话 {session_id} 已初始化，加载 {len(session.history.messages)} 条历史")
 
     def get_history(self, session_id: str) -> BaseChatMessageHistory:
         session = self.get_or_create_session(session_id)
@@ -132,11 +156,24 @@ class MemoryManager:
 
         return limited_history
 
-    def add_user_message(self, session_id: str, text: str) -> None:
-        if not text:
+    def add_user_message(self, session_id: str, content) -> None:
+        """
+        添加用户消息（支持多模态）
+        content 可以是：
+        - str: 纯文本
+        - list: 多模态内容 [{"type": "text", "text": "..."}, {"type": "image_url", ...}]
+        """
+        if not content:
             return
         session = self.get_or_create_session(session_id)
-        session.history.add_user_message(text)
+
+        from langchain_core.messages import HumanMessage
+        if isinstance(content, str):
+            session.history.add_user_message(content)
+        else:
+            # 多模态内容
+            session.history.add_message(HumanMessage(content=content))
+
         session.touch()
 
     def add_ai_message(self, session_id: str, text: str) -> None:

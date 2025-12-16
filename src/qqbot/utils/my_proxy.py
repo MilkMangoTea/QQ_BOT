@@ -56,10 +56,13 @@ async def ai_completion(session_id, user_content):
                     llm_config=temp_config
                 )
 
-                # 调用 chain
+                # 调用 chain（支持图片）
+                # 将 user_content 转换为 HumanMessage
+                from langchain_core.messages import HumanMessage
+                input_msg = HumanMessage(content=user_content)
                 response = await asyncio.to_thread(
                     chain.invoke,
-                    {"input": user_text, "long_memory": long_mem},
+                    {"input": [input_msg], "long_memory": long_mem},
                     config={"configurable": {"session_id": session_id}}
                 )
 
@@ -137,26 +140,29 @@ async def remember(websocket, event):
         message = event.get("message")
         nickname = event.get("sender").get("nickname")
 
-        # 处理消息，提取文本
+        # 处理消息，保留完整的多模态内容
         msgs = process_single_message(message, nickname, CURRENT_LLM)
 
         for msg in msgs:
             role = msg.get("role")
             content = msg.get("content", [])
 
-            # 拼接文本内容（包括图片标记）
-            text_parts = []
-            for part in content:
-                if isinstance(part, dict):
-                    if part.get("type") == "text":
-                        text_parts.append(part.get("text", ""))
-                    elif part.get("type") == "image_url":
-                        text_parts.append("[图片]")
+            if role == "user" and content:
+                # 直接传递多模态内容
+                memory_manager.add_user_message(session_id, content)
 
-            text = "".join(text_parts).strip()
-            if text and role == "user":
-                memory_manager.add_user_message(session_id, text)
-                out("💾 新用户消息:", text[:80])
+                # 提取文本用于日志
+                text_parts = []
+                for part in content:
+                    if isinstance(part, dict):
+                        if part.get("type") == "text":
+                            text_parts.append(part.get("text", ""))
+                        elif part.get("type") == "image_url":
+                            text_parts.append("[图片]")
+
+                text = "".join(text_parts).strip()
+                if text:
+                    out("💾 新用户消息:", text[:80])
 
     except Exception as e:
         print(f"⚠️ [remember] 异常: {e}")
@@ -169,17 +175,16 @@ async def handle_message(websocket, event):
         msg_type = event.get("message_type")
         out("⏳ 当前会话:", session_id)
 
-        # 从 event 提取用户输入（remember 已经加入记忆，这里只提取文本）
+        # 从 event 提取用户输入（包括文本和图片）
         message = event.get("message")
         nickname = event.get("sender").get("nickname")
         msgs = process_single_message(message, nickname, CURRENT_LLM)
 
-        # 提取最后一条用户文本
-        user_content = None
-        for msg in reversed(msgs):
+        # 合并所有用户消息内容（包括图片）
+        user_content = []
+        for msg in msgs:
             if msg.get("role") == "user":
-                user_content = msg.get("content", [])
-                break
+                user_content.extend(msg.get("content", []))
 
         if not user_content:
             user_content = [{"type": "text", "text": "[无文本内容]"}]

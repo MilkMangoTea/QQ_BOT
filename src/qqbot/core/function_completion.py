@@ -130,6 +130,7 @@ def convert_openai_to_langchain(messages):
             text = "".join(p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text")
             result.append(SystemMessage(content=text))
         elif role == "user":
+            # 支持多模态内容（文本+图片）
             result.append(HumanMessage(content=content))
         elif role == "assistant":
             text = "".join(p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text")
@@ -328,11 +329,12 @@ def create_chat_chain_with_memory(memory_manager, long_memory_pool, system_promp
     llm = create_chat_llm(llm_config)
 
     # 定义 prompt，包含系统提示、长期记忆、短期历史、当前输入
+    # 使用 MessagesPlaceholder 支持多模态内容（文本+图片）
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
         ("system", "【相关长期记忆】\n{long_memory}"),
         MessagesPlaceholder(variable_name="history"),
-        ("human", "{input}")
+        MessagesPlaceholder(variable_name="input")
     ])
 
     # 构建基础 chain
