@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 # ===== 配置 =====
 
 # 资源路径
-FORTUNE_PATH = Path("/fortune_resources")
+FORTUNE_PATH = Path("fortune_resources")
 IMG_PATH = FORTUNE_PATH / "img"
 FONT_PATH = FORTUNE_PATH / "font"
 COPYWRITING_PATH = FORTUNE_PATH / "copywriting.json"
@@ -50,9 +50,6 @@ def get_copywriting() -> Tuple[str, str]:
 def get_available_themes() -> Tuple[List[str], List[int]]:
     themes = []
     weights = []
-
-    print(f"🔍 检查资源路径: {IMG_PATH}")
-    print(f"🔍 路径是否存在: {IMG_PATH.exists()}")
 
     for theme, config in THEME_CONFIG.items():
         if config.get("enabled", False) and (IMG_PATH / theme).exists():

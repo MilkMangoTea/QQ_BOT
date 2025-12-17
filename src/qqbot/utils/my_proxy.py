@@ -218,7 +218,7 @@ async def qq_bot():
             websocket=ws,
             target_groups=FORTUNE_GROUPS,
             push_hour=8,
-            push_minute=9,
+            push_minute=30,
             theme="random"
         )
 
