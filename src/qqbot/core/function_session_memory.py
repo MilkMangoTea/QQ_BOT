@@ -71,7 +71,7 @@ class MemoryManager:
         # 清空现有历史
         session.history.clear()
 
-        # 填充历史消息（支持多模态）
+        # 填充历史消息
         from langchain_core.messages import HumanMessage, AIMessage
         from src.qqbot.core.function_completion import url_to_base64
 

@@ -77,16 +77,14 @@ async def get_nearby_message(websocket, event, llm):
         response = await websocket.recv()
         data = json.loads(response)
 
-        res = []
         if data.get("status") == "ok":
-            messages = data.get("data").get("messages")[-config.MESSAGE_COUNT:]
-            for log in messages:
-                processed_msgs = process_single_message(log.get("message"), log.get("sender").get("nickname"), llm)
-                res.extend(processed_msgs)
-            return res
+            messages = data.get("data", {}).get("messages", [])
+            return messages[-config.MESSAGE_COUNT:] if messages else []
+        return []
 
     except Exception as e:
         print("⚠️ 获取群聊消息时发生错误:", str(e))
+        return []
 
 # 处理一条 CQ 消息，生成可直接塞进 handle_pool 的列表
 def process_single_message(message, nickname, llm):
