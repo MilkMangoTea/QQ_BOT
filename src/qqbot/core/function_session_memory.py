@@ -196,7 +196,17 @@ class MemoryManager:
         lines: List[str] = []
         for msg in messages:
             role = getattr(msg, "type", "")
-            content = (getattr(msg, "content", "") or "").strip()
+            content_raw = getattr(msg, "content", "") or ""
+
+            # 处理多模态内容（list）或纯文本（str）
+            if isinstance(content_raw, list):
+                text_parts = []
+                for part in content_raw:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                content = "".join(text_parts).strip()
+            else:
+                content = content_raw.strip() if isinstance(content_raw, str) else ""
 
             if not content:
                 continue
