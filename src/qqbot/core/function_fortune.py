@@ -15,10 +15,10 @@ OUT_PATH = FORTUNE_PATH / "out"
 
 # 启用的主题
 THEME_CONFIG = {
-    "hololive": {"enabled": True, "weight": 2},
-    "touhou": {"enabled": True, "weight": 5},
-    "touhou_lostword": {"enabled": True, "weight": 5},
-    "hoshizora": {"enabled": True, "weight": 2},
+    "hololive": {"enabled": True, "weight": 7},
+    "touhou": {"enabled": True, "weight": 10},
+    "touhou_lostword": {"enabled": True, "weight": 10},
+    "hoshizora": {"enabled": True, "weight": 5},
     "mmt": {"enabled": True, "weight": 1},
     "gura": {"enabled": True, "weight": 4}
 }
@@ -50,6 +50,9 @@ def get_copywriting() -> Tuple[str, str]:
 def get_available_themes() -> Tuple[List[str], List[int]]:
     themes = []
     weights = []
+
+    print(f"🔍 检查资源路径: {IMG_PATH}")
+    print(f"🔍 路径是否存在: {IMG_PATH.exists()}")
 
     for theme, config in THEME_CONFIG.items():
         if config.get("enabled", False) and (IMG_PATH / theme).exists():
