@@ -25,6 +25,8 @@ memory_manager = MemoryManager(
     context_window=15
 )
 
+# 缓存 chain，避免每次都创建新实例
+_CHAIN_CACHE = {}
 
 # 大模型请求器(注意message不能为空!)
 async def ai_completion(session_id, user_content):
@@ -48,13 +50,15 @@ async def ai_completion(session_id, user_content):
                 temp_config = CURRENT_LLM.copy()
                 temp_config["NAME"] = model_name
 
-                # 动态创建 chain
-                chain = create_chat_chain_with_memory(
-                    memory_manager=memory_manager,
-                    long_memory_pool=memory_pool,
-                    system_prompt=system_prompt,
-                    llm_config=temp_config
-                )
+                # 使用缓存的 chain
+                if model_name not in _CHAIN_CACHE:
+                    _CHAIN_CACHE[model_name] = create_chat_chain_with_memory(
+                        memory_manager=memory_manager,
+                        long_memory_pool=memory_pool,
+                        system_prompt=system_prompt,
+                        llm_config=temp_config
+                    )
+                chain = _CHAIN_CACHE[model_name]
 
                 # 调用 chain（支持图片）
                 # 将 user_content 转换为 HumanMessage
@@ -217,7 +221,7 @@ async def qq_bot():
         fortune_scheduler = setup_daily_fortune_scheduler(
             websocket=ws,
             target_groups=FORTUNE_GROUPS,
-            push_hour=9,
+            push_hour=8,
             push_minute=0,
             theme="random"
         )

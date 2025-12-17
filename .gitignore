@@ -2,14 +2,29 @@ my_env
 tests/test.py
 NapCatInstaller.app
 requirements
-__pycache__
-.idea
 .venv
+/tests/
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+.idea_modules/
+
+# macOS
+.DS_Store
+
+# Config files
 *.json
-*.sh
-*.json
-*.pyc
 *.sh
 tests/yuri_note.txt
-/tests/

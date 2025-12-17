@@ -111,12 +111,6 @@ def is_image_only_event(event: dict) -> bool:
             if _text_has_meaningful_words(text):
                 has_text_meaning = True
 
-    # 兜底检查顶层 text 字段
-    if not has_text_meaning:
-        fallback = (event.get("text") or "").strip()
-        if _text_has_meaningful_words(fallback):
-            has_text_meaning = True
-
     return has_image and not has_text_meaning
 
 # 把 OpenAI 格式消息转换为 LangChain 格式
@@ -278,10 +272,15 @@ def _make_llm():
 
 set_llm_cache(InMemoryCache())
 
+# 缓存 decision chain，避免每次都创建新实例
+_CACHED_DECISION_CHAIN = None
 
 def _decision_chain():
-    llm = _make_llm()
-    return _PROMPT | llm.with_structured_output(Decision)
+    global _CACHED_DECISION_CHAIN
+    if _CACHED_DECISION_CHAIN is None:
+        llm = _make_llm()
+        _CACHED_DECISION_CHAIN = _PROMPT | llm.with_structured_output(Decision)
+    return _CACHED_DECISION_CHAIN
 
 
 # LangChain 判定
@@ -329,7 +328,7 @@ def create_chat_chain_with_memory(memory_manager, long_memory_pool, system_promp
     llm = create_chat_llm(llm_config)
 
     # 定义 prompt，包含系统提示、长期记忆、短期历史、当前输入
-    # 使用 MessagesPlaceholder 支持多模态内容（文本+图片）
+    # MessagesPlaceholder 支持多模态内容（文本+图片）
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
         ("system", "【相关长期记忆】\n{long_memory}"),
