@@ -217,8 +217,8 @@ async def qq_bot():
         fortune_scheduler = setup_daily_fortune_scheduler(
             websocket=ws,
             target_groups=FORTUNE_GROUPS,
-            push_hour=8,
-            push_minute=30,
+            push_hour=9,
+            push_minute=0,
             theme="random"
         )
 
