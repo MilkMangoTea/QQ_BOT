@@ -1,5 +1,4 @@
 import base64
-import requests
 import urllib.parse
 import re
 import httpx
@@ -22,11 +21,10 @@ def build_params(type, event, content):
     return {**base, "message_type": msg_type, key: event[key]}
 
 
-# 图片转换（原样保留）
-def url_to_base64(url, timeout=(5, 20)):
+# 图片转换（异步版本）
+async def url_to_base64(url, timeout=10):
     """
     返回 data:<mime>;base64,... 或 None（出错时）。
-    timeout: (connect_timeout, read_timeout)
     """
     try:
         parsed = urllib.parse.urlparse(url)
@@ -40,9 +38,10 @@ def url_to_base64(url, timeout=(5, 20)):
             "Referer": origin,
         }
 
-        resp = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
-        resp.raise_for_status()
-        content = resp.content
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(url, headers=headers, follow_redirects=True)
+            resp.raise_for_status()
+            content = resp.content
 
         ct = (resp.headers.get("Content-Type") or "").split(";")[0].lower()
         # 简易 magic bytes 嗅探
@@ -60,7 +59,7 @@ def url_to_base64(url, timeout=(5, 20)):
         b64 = base64.b64encode(content).decode("utf-8")
         return f"data:{ct};base64,{b64}"
 
-    except requests.exceptions.RequestException as e:
+    except httpx.HTTPError as e:
         print(f"⚠️ 请求失败: {e}")
     except Exception as e:
         print(f"⚠️ 处理异常: {e}")

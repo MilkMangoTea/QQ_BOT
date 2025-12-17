@@ -145,7 +145,7 @@ async def remember(websocket, event):
         nickname = event.get("sender").get("nickname")
 
         # 处理消息，保留完整的多模态内容
-        msgs = process_single_message(message, nickname, CURRENT_LLM)
+        msgs = await process_single_message(message, nickname, CURRENT_LLM)
 
         for msg in msgs:
             role = msg.get("role")
@@ -182,7 +182,7 @@ async def handle_message(websocket, event):
         # 从 event 提取用户输入（包括文本和图片）
         message = event.get("message")
         nickname = event.get("sender").get("nickname")
-        msgs = process_single_message(message, nickname, CURRENT_LLM)
+        msgs = await process_single_message(message, nickname, CURRENT_LLM)
 
         # 合并所有用户消息内容（包括图片）
         user_content = []
