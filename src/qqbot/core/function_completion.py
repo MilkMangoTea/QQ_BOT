@@ -20,52 +20,6 @@ def build_params(type, event, content):
     key = "user_id" if msg_type == "private" else "group_id"
     return {**base, "message_type": msg_type, key: event[key]}
 
-
-# 图片转换（异步版本）
-async def url_to_base64(url, timeout=10):
-    """
-    返回 data:<mime>;base64,... 或 None（出错时）。
-    """
-    try:
-        parsed = urllib.parse.urlparse(url)
-        origin = f"{parsed.scheme}://{parsed.netloc}"
-
-        headers = {
-            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                           "AppleWebKit/537.36 (KHTML, like Gecko) "
-                           "Chrome/120.0.0.0 Safari/537.36"),
-            "Accept": "image/*,*/*;q=0.8",
-            "Referer": origin,
-        }
-
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(url, headers=headers, follow_redirects=True)
-            resp.raise_for_status()
-            content = resp.content
-
-        ct = (resp.headers.get("Content-Type") or "").split(";")[0].lower()
-        # 简易 magic bytes 嗅探
-        if not ct.startswith("image/"):
-            if content.startswith(b"\x89PNG\r\n\x1a\n"):
-                ct = "image/png"
-            elif content.startswith(b"\xff\xd8\xff"):
-                ct = "image/jpeg"
-            elif content[:6] in (b"GIF87a", b"GIF89a"):
-                ct = "image/gif"
-            else:
-                print(f"⚠️ 非图片 Content-Type: {resp.headers.get('Content-Type')}")
-                return None
-
-        b64 = base64.b64encode(content).decode("utf-8")
-        return f"data:{ct};base64,{b64}"
-
-    except httpx.HTTPError as e:
-        print(f"⚠️ 请求失败: {e}")
-    except Exception as e:
-        print(f"⚠️ 处理异常: {e}")
-    return None
-
-
 # ===== LangChain 相关 =====
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_openai import ChatOpenAI

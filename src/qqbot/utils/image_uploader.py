@@ -79,7 +79,7 @@ async def upload_image_url_to_worker(image_url: str) -> Optional[str]:
         Uploaded image CDN URL, or None if failed
     """
     worker_url = os.getenv("WORKER_URL")
-    worker_api_key = os.getenv("WORKER_API_KEY")
+    worker_api_key = os.getenv("API_KEY")
 
     if not worker_url or not worker_api_key:
         return None
