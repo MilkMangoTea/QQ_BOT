@@ -1,5 +1,6 @@
 from src.qqbot.config import config
 from src.qqbot.core.function_image_providers import *
+from src.qqbot.utils.image_uploader import get_image_url_or_fallback
 
 def _extract_cmd_text_from_event(msg_list, prefix="/s"):
     """
@@ -27,7 +28,7 @@ def _extract_cmd_text_from_event(msg_list, prefix="/s"):
     cmd_text = full[idx:].strip()
     return cmd_text or None
 
-def special_event(event):
+async def special_event(event):
     """
     仅 /s 开头被当作命令，其他一律当普通消息
     /s img <标签...> [r18]       或   /s 图片 <标签...> [r18]
@@ -84,9 +85,12 @@ def special_event(event):
                 url, src = None, None
 
             if url:
+                # 上传到Worker或fallback到base64
+                final_url = await get_image_url_or_fallback(url)
+
                 route["message"] = [
                     {"type":"text","data":{"text": f"[{src}] "}},
-                    {"type":"image","data":{"file": url}}
+                    {"type":"image","data":{"file": final_url}}
                 ]
             else:
                 route["message"] = [{"type":"text","data":{"text":"没找到符合标签的图片 :("}}]

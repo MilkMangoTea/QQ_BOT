@@ -1,236 +1,963 @@
 # QQ Bot Framework
 
-一个基于 Python 的 QQ 群聊机器人框架，支持接入多种大语言模型，提供拟人化的对话体验和丰富的功能。
+<div align="center">
 
-## 特性
+🤖 一个基于 Python 的智能 QQ 群聊机器人框架
 
-- **多模型支持**：集成多种大语言模型
-  - DeepSeek (V3, R1)
-  - 通义千问 (qwen2.5-vl-72b, qwen-plus)
-  - 智谱 GLM-4.5-flash
-  - AIZEX (GPT-4.1, GPT-5, Claude-4)
-  - 支持模型降级和切换
+支持多 LLM 接入 · 双记忆系统 · 拟人化交互 · 模块化设计
 
-- **智能交互**
-  - 拟人化对话（多种人格模式可选）
+</div>
+
+---
+
+## ✨ 特性一览
+
+### 🧠 多 LLM 支持
+- **主流模型集成**：DeepSeek (V3, R1)、通义千问 (qwen2.5-vl-72b, qwen-plus)、智谱 GLM-4.5-flash、AIZEX (GPT-4.1, GPT-5, Claude-4) 等
+- **智能降级机制**：主模型失败时自动切换备用模型
+- **灵活配置**：支持自定义 API 端点和模型参数
+
+### 💬 智能交互系统
+- **多触发模式**
   - 群聊随机回复（可配置概率）
-  - 被@自动回复
-  - AI 智能判断是否回复（基于 LangChain）
+  - @提及自动响应
+  - 私聊消息 100% 回复
+  - AI 智能判断（基于 LangChain）
+- **拟人化对话**：支持多种人格模式，让对话更自然
+- **上下文理解**：结合短期和长期记忆进行连贯对话
 
-- **记忆系统**
-  - 短期会话记忆（10分钟超时）
-  - 长期记忆（Mem0 + Milvus 向量数据库）
-  - 自动记忆管理和检索
+### 🧩 双记忆系统
+- **短期会话记忆**
+  - 基于 session 的临时存储
+  - 10 分钟超时自动清理
+  - 保持对话连续性
+- **长期记忆**
+  - Mem0 + Milvus 向量数据库
+  - 持久化存储用户信息
+  - 智能检索相关记忆
 
-- **丰富功能**
-  - 图片搜索（支持 Safe/R18 模式）
-  - 每日运势推送（定时任务）
-  - 表情包随机回复
-  - 戳一戳互动
-  - 私聊模式支持
+### 🎯 功能模块
+- **图片搜索**：多源图片获取，支持 Safe/R18 模式
+- **每日运势**：定时推送，支持多主题（hololive、东方Project 等）
+- **表情互动**：随机表情回复、戳一戳互动
+- **命令系统**：灵活的 `/s` 命令前缀系统
 
-- **模块化设计**
-  - 清晰的目录结构
-  - 易于扩展
-  - 配置集中管理
+### ⚙️ 技术架构
+- **异步 WebSocket**：基于 NapCat 的高性能连接
+- **模块化设计**：清晰的分层架构，易于扩展
+- **配置集中管理**：所有配置项统一管理，便于维护
+- **错误处理**：完善的异常处理和降级策略
 
-## 快速开始
+---
 
-### 前置要求
+## 🚀 快速开始
 
-- Python 3.8+
-- WebSocket服务（推荐使用NapCat）
-- 环境变量配置文件
+### 📋 前置要求
 
-### 部署步骤
+- **Python 3.8+** (推荐 3.10 及以上)
+- **NapCat** WebSocket 服务 (或其他兼容的 QQ 协议端)
+- **API 密钥**：至少一个 LLM 提供商的 API Key
 
-1. **克隆仓库到本地**
+### 📦 部署步骤
+
+#### 1. 克隆仓库
 
 ```bash
 git clone [你的仓库地址]
 cd QQ_BOT
 ```
 
-2. **安装依赖**
+#### 2. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-3. **配置环境变量**
+> **依赖说明**：项目使用 `httpx`、`websockets`、`langchain`、`mem0ai` 等核心库
 
-创建环境变量文件 `my_env/api_key.env`（或直接编辑现有文件）：
+#### 3. 配置环境变量
+
+创建环境变量文件（默认路径：`/opt/QQ_BOT/my_env/api_key.env`，可在 `config.py` 中修改）：
 
 ```env
-# 必填配置
-DEEPSEEK="your_deepseek_api_key"
-ALI="your_qwen_api_key"
-ZHIPU="your_glm_api_key"
-AIZEX="your_aizex_api_key"
+# ========== 必填配置 ==========
+# LLM API Keys（至少配置一个）
+DEEPSEEK="sk-xxx"              # DeepSeek API Key
+ALI="sk-xxx"                   # 阿里云通义千问 API Key
+ZHIPU="xxx.xxx"                # 智谱 AI API Key
+AIZEX="sk-xxx"                 # AIZEX API Key
 
-# QQ号配置
-MY_QQ_ID=你的QQ号
-BOT_QQ_ID=机器人QQ号
+# QQ 配置
+MY_QQ_ID=123456789             # 你的 QQ 号
+BOT_QQ_ID=987654321            # 机器人的 QQ 号
 
-# 可选配置（用于图片和记忆功能）
-PIXIV_REFRESH_TOKEN="your_pixix_token"
-ZILLIZ_API_KEY="your_zilliz_api_key"
+# ========== 可选配置 ==========
+# 图片功能（可选）
+PIXIV_REFRESH_TOKEN="xxx"      # Pixiv 刷新令牌（用于图片搜索）
+
+# 长期记忆功能（可选）
+ZILLIZ_API_KEY="xxx"           # Zilliz Cloud API Key（Milvus 向量数据库）
 ```
 
-> 注意：配置文件路径必须在 `/opt/QQ_BOT/my_env/api_key.env` 或创建软链接
+> **提示**：
+> - 如果项目不在 `/opt/QQ_BOT` 路径，可以修改 `src/qqbot/config/config.py` 中的环境变量文件路径
+> - 或创建软链接：`ln -s /your/path/my_env /opt/QQ_BOT/my_env`
 
-4. **配置群聊白名单**
+#### 4. 配置机器人行为
 
-编辑 `src/qqbot/config/config.py`，修改：
-- `ALLOWED_GROUPS`：允许机器人响应的群聊列表
-- `FORTUNE_GROUPS`：接收每日运势推送的群聊列表
-- `WEBSOCKET_URI`：WebSocket连接地址（默认本地3001端口）
+编辑 `src/qqbot/config/config.py`，根据需求调整以下配置：
 
-5. **启动NapCat**
+```python
+# WebSocket 连接
+WEBSOCKET_URI = "ws://127.0.0.1:3001"
 
-安装并配置NapCat作为QQ协议端，确保WebSocket服务运行在 `ws://127.0.0.1:3001`
+# 群组白名单（只在这些群聊中响应）
+ALLOWED_GROUPS = [123456789, 987654321]
 
-6. **运行机器人**
+# 每日运势推送群组
+FORTUNE_GROUPS = [123456789]
+
+# 回复概率（1-100）
+RAN_REP_PROBABILITY = 3
+
+# 当前使用的 LLM
+CURRENT_COMPLETION = "DEEPSEEK"
+
+# 人格设定（0-3 选择不同的人格）
+CURRENT_PROMPT = 1
+```
+
+#### 5. 启动 NapCat
+
+确保 NapCat WebSocket 服务正常运行：
+- 默认地址：`ws://127.0.0.1:3001`
+- 登录你的机器人 QQ 账号
+- 确保 WebSocket 服务已开启
+
+#### 6. 运行机器人
 
 ```bash
 python src/qqbot/utils/my_proxy.py
 ```
 
-### 验证连接
+看到以下信息表示启动成功：
+```
+✅ 长期记忆系统初始化成功
+⏰ 每日运势定时任务已启动
+🔗 正在连接 WebSocket...
+✅ WebSocket 连接成功！
+```
 
+### ✅ 验证部署
+
+在 QQ 群聊中：
+1. **@机器人**，测试是否响应
+2. 发送 `/s 图片 猫咪`，测试图片搜索功能
+3. 等待每日 9:00，查看是否推送运势
+
+或运行测试脚本：
 ```bash
 python tests/test.py
 ```
 
-测试 API 连接是否正常。
+---
 
-### 配置说明
+## ⚙️ 配置指南
 
-所有配置项都集中在 `src/qqbot/config/config.py` 文件中：
+所有配置项都集中在 `src/qqbot/config/config.py` 文件中。
 
-- **WebSocket配置**
-  - `WEBSOCKET_URI`: WebSocket服务器地址
-  - `MY_QQ_ID`: 你的QQ号
-  - `BOT_QQ_ID`: 机器人QQ号
+### WebSocket 连接
 
-- **LLM配置**
-  - `CURRENT_COMPLETION`: 当前使用的LLM服务
-  - 支持的模型：DEEPSEEK-V3/R1、ALI (通义)、ZHIPU、AIZEX等
-  - 自动降级机制：主模型失败时尝试备用模型
+```python
+WEBSOCKET_URI = "ws://127.0.0.1:3001"  # NapCat WebSocket 地址
+MY_QQ_ID = 123456789                    # 你的 QQ 号
+BOT_QQ_ID = 987654321                   # 机器人 QQ 号
+```
 
-- **行为配置**
-  - `RAN_REP_PROBABILITY`: 随机回复概率 (1-100)
-  - `RAN_EMOJI_PROBABILITY`: 表情回复概率
-  - `HISTORY_TIMEOUT`: 记忆超时时间（秒）
+### LLM 配置
 
-- **人格配置**
-  - `CURRENT_PROMPT`: 选择当前人格模式（0-3）
-  - `PROMPT`: 人格提示词数组，包含多种人格设定
+```python
+# 当前使用的模型（可选值：DEEPSEEK, ALI, ZHIPU, AIZEX 等）
+CURRENT_COMPLETION = "DEEPSEEK"
 
-- **群组管理**
-  - `ALLOWED_GROUPS`: 允许响应的群聊列表
-  - `FORTUNE_GROUPS`: 接收每日运势的群聊列表
+# LLM 字典配置（支持自定义模型）
+LLM = {
+    "DEEPSEEK": {
+        "NAME": "deepseek-chat,deepseek-reasoner",  # 支持多模型降级
+        "URL": "https://api.deepseek.com",
+        "KEY": os.getenv("DEEPSEEK")
+    },
+    # ... 更多模型配置
+}
+```
 
-## 功能特性
+**多模型降级**：在 `NAME` 字段用逗号分隔多个模型名，失败时自动尝试下一个。
 
-### 智能回复系统
+### 行为配置
 
-- **多种触发模式**
-  - 随机概率回复：配置的概率主动参与讨论
-  - @回复：被@时自动响应
-  - 私聊回复：私聊消息100%响应
-  - AI判断：基于上下文智能决定是否回复
+```python
+# 随机回复概率（1-100），数字越大越活跃
+RAN_REP_PROBABILITY = 3
 
-- **回复策略**
-  - 基于 LangChain 的结构化判断
-  - 可配置多个大模型，自动降级切换
-  - 记忆系统增强对话连续性
+# 表情回复概率（1-100）
+RAN_EMOJI_PROBABILITY = 20
 
-### 命令系统
+# 会话记忆超时时间（秒）
+HISTORY_TIMEOUT = 600  # 10 分钟
 
-支持的命令（以 `/s` 为前缀）：
+# 上下文窗口大小（保留最近 N 轮对话）
+CONTEXT_WINDOW = 15
+```
 
-- **图片搜索**
-  ```
-  /s img <标签...> [r18]
-  /s 图片 <标签...> [r18]
-  ```
-  从多个图片源搜索并返回图片，支持安全模式和R18模式
+### 人格配置
 
-- **控制台命令**（仅限指定用户私聊使用）
-  ```
-  /s 群聊 <群号>    # 切换到指定群聊
-  /s 私聊 <用户ID>  # 切换到指定私聊
-  ```
+```python
+# 选择人格（0-3）
+CURRENT_PROMPT = 1
 
-### 记忆系统
+# 人格提示词数组
+PROMPT = [
+    "你是一个友好的助手...",  # 基础人格
+    "你是一个活泼可爱的猫娘...",  # 人格 1
+    # ... 更多人格
+]
+```
 
-- **短期记忆**：会话上下文管理，10分钟超时自动清理
-- **长期记忆**：基于 Mem0 + Milvus 的向量记忆，持久化存储用户信息
-- **智能检索**：根据对话内容自动检索相关记忆
+### 群组管理
 
-### 每日运势
+```python
+# 允许机器人响应的群聊 ID 列表
+ALLOWED_GROUPS = [
+    123456789,
+    987654321,
+]
 
-- 自动定时推送每日运势（默认每日9:00）
-- 支持多主题（hololive、东方Project等）
-- 可配置推送群组列表
+# 接收每日运势推送的群聊 ID 列表
+FORTUNE_GROUPS = [
+    123456789,
+]
+```
 
-## 项目结构
+---
+
+## 📖 功能详解
+
+### 💬 智能回复系统
+
+机器人使用多种策略决定是否回复消息：
+
+#### 触发模式
+1. **随机概率回复**
+   - 按配置的概率（`RAN_REP_PROBABILITY`）主动参与群聊讨论
+   - 模拟真实用户的随机性，避免过于活跃
+
+2. **@提及响应**
+   - 被@时 100% 回复
+   - 支持多人对话场景
+
+3. **私聊模式**
+   - 私聊消息 100% 回复
+   - 提供完整的上下文支持
+
+4. **AI 智能判断** ⭐
+   - 基于 LangChain 的结构化输出
+   - 分析对话上下文，判断是否需要回复
+   - 避免不必要的打断
+
+#### 工作流程
+```
+收到消息 → 检查是否在白名单群组 → 判断是否需要回复
+           ↓
+    是否被@？ → 是 → 100% 回复
+           ↓
+    随机概率 → 命中 → 调用 LLM 生成回复
+           ↓
+    AI 判断 → 需要回复 → 调用 LLM 生成回复
+```
+
+### 🎮 命令系统
+
+所有命令以 `/s` 开头，支持以下功能：
+
+#### 图片搜索
+```bash
+/s img <标签1> <标签2> ... [r18]
+/s 图片 <标签1> <标签2> ... [r18]
+```
+- **标签搜索**：支持多个标签组合（空格分隔）
+- **安全模式**：默认搜索 Safe 内容
+- **R18 模式**：在末尾添加 `r18` 参数（需谨慎使用）
+- **多源支持**：从 Pixiv、Yande.re 等多个图片源搜索
+
+**示例**：
+```
+/s img 猫娘 白发          # 搜索"猫娘"和"白发"标签的图片
+/s 图片 风景 夕阳 r18     # R18 模式搜索
+```
+
+#### 控制台命令（管理员专用）
+仅在私聊模式下，由指定用户（`MY_QQ_ID`）使用：
+```bash
+/s 群聊 <群号>      # 切换到指定群聊发送消息
+/s 私聊 <用户ID>    # 切换到指定私聊发送消息
+```
+
+### 🧠 记忆系统
+
+#### 短期会话记忆
+- **存储内容**：最近 15 轮对话（可配置 `CONTEXT_WINDOW`）
+- **超时机制**：10 分钟无互动自动清空（`HISTORY_TIMEOUT`）
+- **Session ID**：基于群组/用户 ID 和消息 ID 生成
+- **实现**：`function_session_memory.py`
+
+**优势**：
+- 保持对话连续性
+- 理解上下文和代词指代
+- 快速响应，无需查询数据库
+
+#### 长期记忆
+- **存储内容**：用户信息、偏好、历史交互
+- **向量数据库**：Milvus (Zilliz Cloud)
+- **记忆框架**：Mem0
+- **检索策略**：基于语义相似度的智能检索
+- **实现**：`function_long_turn_memory.py`
+
+**优势**：
+- 跨会话记忆用户信息
+- 个性化回复
+- 长期关系建立
+
+**工作流程**：
+```
+用户消息 → 检索长期记忆 → 结合短期记忆 → 生成回复 → 更新记忆
+```
+
+### 🎲 每日运势
+
+- **定时推送**：每天 9:00 自动推送（可在 `function_fortune.py` 中修改）
+- **图片生成**：动态生成运势卡片（基于 Pillow）
+- **多主题支持**：
+  - hololive 角色
+  - 东方 Project 角色
+  - 自定义主题
+- **配置**：在 `FORTUNE_GROUPS` 中添加需要接收运势的群组
+
+**运势内容包括**：
+- 幸运数字
+- 幸运颜色
+- 今日宜/忌
+- 运势评分
+
+---
+
+## 🏗️ 技术架构
+
+### 系统架构图
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                        QQ Bot                           │
+├─────────────────────────────────────────────────────────┤
+│  WebSocket Client (my_proxy.py)                        │
+│    ├─ 接收消息                                         │
+│    ├─ 发送消息                                         │
+│    └─ 心跳保活                                         │
+├─────────────────────────────────────────────────────────┤
+│  核心逻辑 (function.py)                                │
+│    ├─ rep(): 判断是否回复                             │
+│    ├─ ai_completion(): 调用 LLM 生成回复              │
+│    └─ send_msg(): 发送消息到 QQ                       │
+├─────────────────────────────────────────────────────────┤
+│  功能模块                                              │
+│    ├─ function_cmd.py: 命令处理                       │
+│    ├─ function_completion.py: AI 判断 (LangChain)     │
+│    ├─ function_session_memory.py: 短期记忆            │
+│    ├─ function_long_turn_memory.py: 长期记忆 (Mem0)   │
+│    ├─ function_fortune.py: 每日运势                   │
+│    └─ function_image_providers.py: 图片源管理         │
+├─────────────────────────────────────────────────────────┤
+│  配置层 (config.py)                                    │
+│    └─ 环境变量、LLM 配置、行为参数                    │
+└─────────────────────────────────────────────────────────┘
+          ↓                      ↑
+    [NapCat]             [LLM APIs]  [Milvus]
+```
+
+### 消息处理流程
+
+```python
+# 简化的消息处理流程
+async def on_message(data):
+    # 1. 解析消息
+    message_type = data.get("post_type")
+    if message_type != "message":
+        return
+
+    # 2. 检查白名单
+    group_id = data.get("group_id")
+    if group_id not in ALLOWED_GROUPS:
+        return
+
+    # 3. 判断是否回复 (rep 函数)
+    should_reply = await rep(data)
+    if not should_reply:
+        return
+
+    # 4. 生成回复
+    session_id = calc_session_id(data)
+    response = await ai_completion(session_id, user_content)
+
+    # 5. 发送消息
+    await send_msg(group_id, response)
+
+    # 6. 更新记忆（异步）
+    asyncio.create_task(update_memory(session_id, user_content, response))
+```
+
+### LLM 降级策略
+
+```python
+# 多模型降级配置
+LLM["DEEPSEEK"]["NAME"] = "deepseek-chat,deepseek-reasoner"
+
+# 降级逻辑
+for model_name in names:  # ["deepseek-chat", "deepseek-reasoner"]
+    try:
+        response = await call_llm(model_name, messages)
+        return response  # 成功则返回
+    except Exception as e:
+        last_error = e
+        continue  # 失败则尝试下一个模型
+
+# 所有模型失败后返回错误
+return "❌ 所有模型都失败了"
+```
+
+### 依赖关系
+
+```
+核心依赖：
+├── websockets (WebSocket 通信)
+├── httpx (HTTP 客户端，支持 HTTP/2)
+├── asyncio (异步编程)
+├── langchain + langchain-openai (AI 判断)
+├── mem0ai + pymilvus (长期记忆)
+├── pillow (图片处理)
+└── apscheduler (定时任务)
+```
+
+---
+
+## 📂 项目结构
 
 ```
 QQ_BOT/
-├── src/qqbot/           # 源代码目录
+├── src/qqbot/                    # 源代码目录
 │   ├── config/
-│   │   └── config.py    # 配置文件
+│   │   └── config.py             # 配置管理（环境变量、LLM、行为参数）
 │   ├── core/
-│   │   ├── function.py              # 核心功能
-│   │   ├── function_cmd.py          # 命令处理
-│   │   ├── function_completion.py   # AI判断是否回复
-│   │   ├── function_session_memory.py     # 短期记忆
-│   │   ├── function_long_turn_memory.py   # 长期记忆
-│   │   ├── function_fortune.py      # 运势功能
-│   │   └── function_image_providers.py   # 图片源
+│   │   ├── function.py           # 核心功能（消息处理、LLM 调用）
+│   │   ├── function_cmd.py       # 命令系统（/s 命令解析）
+│   │   ├── function_completion.py   # AI 回复判断（LangChain）
+│   │   ├── function_session_memory.py   # 短期会话记忆
+│   │   ├── function_long_turn_memory.py # 长期记忆（Mem0 + Milvus）
+│   │   ├── function_fortune.py   # 每日运势（定时任务、图片生成）
+│   │   └── function_image_providers.py  # 图片源管理（Pixiv 等）
 │   └── utils/
-│       └── my_proxy.py    # 主程序入口
+│       ├── my_proxy.py           # 主程序入口（WebSocket 客户端）
+│       └── image_uploader.py     # 图片上传工具
 ├── tests/
-│   └── test.py         # 测试文件
-├── fortune_resources/   # 运势资源
-├── requirements.txt     # 依赖列表
-└── README.md
-
+│   └── test.py                   # API 连接测试
+├── fortune_resources/            # 运势资源文件
+│   ├── characters/               # 角色图片
+│   └── fonts/                    # 字体文件
+├── my_env/
+│   └── api_key.env               # 环境变量（API Keys）
+├── requirements.txt              # Python 依赖列表
+├── README.md                     # 项目文档（本文件）
+└── CLAUDE.md                     # Claude Code 开发指南
 ```
 
-## 常见问题
+### 核心文件说明
 
-### 环境变量路径问题
-如果出现找不到环境变量文件的错误，请确保：
-1. 文件位于 `/opt/QQ_BOT/my_env/api_key.env`
-2. 或在项目根目录创建 `my_env/api_key.env` 并创建软链接
-
-### 模型切换失败
-检查配置中的 `CURRENT_COMPLETION` 和对应模型的 API 密钥是否正确
-
-### 记忆系统报错
-确保配置了正确的 ZILLIZ_API_KEY，或关闭长期记忆功能
-
-## 开发说明
-
-### 添加新的人格
-在 `config.py` 的 `PROMPT` 数组中添加新的人格描述，并更新 `CURRENT_PROMPT` 索引
-
-### 添加新的LLM
-在 `config.py` 的 `LLM` 字典中添加新的模型配置
-
-### 扩展命令
-在 `function_cmd.py` 中添加新的命令处理逻辑
-
-## 致谢
-
-特别感谢 @novashen666 的支持与贡献。
-
-## 免责声明
-
-本项目仅供学习和研究使用，请勿用于商业或其他非法用途。
+| 文件 | 功能 | 关键函数/类 |
+|-----|------|------------|
+| `my_proxy.py` | WebSocket 客户端，主程序入口 | `on_message()`, `main()` |
+| `function.py` | 消息处理、LLM 调用 | `rep()`, `ai_completion()`, `send_msg()` |
+| `function_cmd.py` | 命令解析和处理 | `handle_command()` |
+| `function_completion.py` | AI 判断是否回复 | `should_reply_chain()` |
+| `function_session_memory.py` | 短期记忆管理 | `MemoryManager` 类 |
+| `function_long_turn_memory.py` | 长期记忆管理 | `LocalDictStore`, `get_long_memory_text()` |
+| `function_fortune.py` | 运势功能 | `send_daily_fortune()`, `generate_fortune_image()` |
+| `config.py` | 配置管理 | 全局配置变量 |
 
 ---
+
+## ❓ 常见问题与故障排查
+
+### 部署相关
+
+#### Q: 找不到环境变量文件
+**症状**：启动时提示 `FileNotFoundError: /opt/QQ_BOT/my_env/api_key.env`
+
+**解决方案**：
+```bash
+# 方案 1：创建软链接
+sudo mkdir -p /opt/QQ_BOT
+sudo ln -s /your/actual/path/my_env /opt/QQ_BOT/my_env
+
+# 方案 2：修改配置文件路径
+# 编辑 src/qqbot/config/config.py，修改环境变量文件路径
+```
+
+#### Q: WebSocket 连接失败
+**症状**：启动后显示 `❌ WebSocket 连接失败`
+
+**排查步骤**：
+1. 检查 NapCat 是否正常运行
+2. 确认 WebSocket 端口正确（默认 3001）
+3. 检查防火墙设置
+4. 查看 NapCat 日志
+
+```bash
+# 测试 WebSocket 连接
+curl -i -N -H "Connection: Upgrade" \
+  -H "Upgrade: websocket" \
+  -H "Host: 127.0.0.1:3001" \
+  http://127.0.0.1:3001
+```
+
+#### Q: 依赖安装失败
+**症状**：`pip install` 时出现错误
+
+**解决方案**：
+```bash
+# 使用国内镜像源
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 或者逐个安装核心依赖
+pip install websockets httpx asyncio langchain openai mem0ai pymilvus pillow apscheduler
+```
+
+### LLM 相关
+
+#### Q: 模型切换失败或无法调用
+**症状**：提示 `❌ 所有模型都失败了`
+
+**排查步骤**：
+1. 检查 API Key 是否正确
+   ```bash
+   # 查看环境变量
+   cat /opt/QQ_BOT/my_env/api_key.env | grep DEEPSEEK
+   ```
+
+2. 验证 API 连接
+   ```bash
+   python tests/test.py
+   ```
+
+3. 检查模型名称是否正确
+   - DeepSeek: `deepseek-chat`, `deepseek-reasoner`
+   - 通义千问: `qwen2.5-vl-72b`, `qwen-plus`
+   - 智谱: `glm-4-flash`, `glm-4-plus`
+
+4. 查看日志输出，定位具体错误
+
+#### Q: 回复速度很慢
+**可能原因**：
+- 网络延迟
+- 模型响应时间长
+- 长期记忆检索耗时
+
+**优化方案**：
+```python
+# 在 config.py 中调整超时设置
+HTTPX_TIMEOUT = httpx.Timeout(
+    connect=5.0,    # 连接超时
+    read=15.0,      # 读取超时（可适当增加）
+    write=5.0,
+    pool=5.0
+)
+
+# 减少上下文窗口大小
+CONTEXT_WINDOW = 10  # 从 15 降低到 10
+
+# 禁用长期记忆（如果不需要）
+# 注释掉 function_long_turn_memory.py 中的相关调用
+```
+
+### 功能相关
+
+#### Q: 机器人不响应消息
+**排查清单**：
+- [ ] 检查群组是否在白名单中（`ALLOWED_GROUPS`）
+- [ ] 检查回复概率是否太低（`RAN_REP_PROBABILITY`）
+- [ ] 尝试@机器人，看是否响应
+- [ ] 查看控制台日志，是否有错误输出
+- [ ] 检查 NapCat 是否收到消息
+
+#### Q: 图片搜索无法使用
+**症状**：发送 `/s img 猫咪` 无响应或报错
+
+**解决方案**：
+1. 检查是否配置了 `PIXIV_REFRESH_TOKEN`
+2. 测试图片源 API 是否可用
+3. 查看 `function_image_providers.py` 日志
+
+#### Q: 每日运势没有推送
+**排查步骤**：
+1. 检查群组是否在 `FORTUNE_GROUPS` 列表中
+2. 确认定时任务是否启动（查看启动日志）
+3. 检查时区设置是否正确
+4. 查看 `fortune_resources/` 目录是否存在必要资源
+
+```python
+# 在 function_fortune.py 中手动触发测试
+from src.qqbot.core.function_fortune import send_daily_fortune
+asyncio.run(send_daily_fortune())
+```
+
+### 记忆系统
+
+#### Q: 长期记忆功能报错
+**症状**：提示 Milvus 或 Mem0 相关错误
+
+**解决方案**：
+```python
+# 方案 1：配置 Zilliz Cloud API Key
+# 在 api_key.env 中添加：
+ZILLIZ_API_KEY="your_zilliz_api_key"
+
+# 方案 2：禁用长期记忆
+# 在 function_long_turn_memory.py 中注释掉 Mem0 初始化
+# 或在 my_proxy.py 中跳过长期记忆相关调用
+```
+
+#### Q: 短期记忆清空太快/太慢
+**调整方法**：
+```python
+# 在 config.py 中修改超时时间
+HISTORY_TIMEOUT = 1200  # 改为 20 分钟（默认 600 秒）
+```
+
+---
+
+## 🛠️ 开发指南
+
+### 添加新的人格
+
+1. 编辑 `src/qqbot/config/config.py`
+2. 在 `PROMPT` 数组中添加新的人格描述
+
+```python
+PROMPT = [
+    "基础设定...",  # 索引 0（必须保留）
+    "活泼的猫娘设定...",  # 索引 1
+    "成熟的姐姐设定...",  # 索引 2
+    "你的新人格设定：是一个博学的学者，说话严谨认真，经常引用古籍...",  # 索引 3（新增）
+]
+
+# 切换到新人格
+CURRENT_PROMPT = 3
+```
+
+### 添加新的 LLM 提供商
+
+1. 在环境变量文件中添加 API Key
+```env
+MY_NEW_LLM_KEY="sk-xxxxx"
+```
+
+2. 在 `config.py` 中添加 LLM 配置
+```python
+LLM = {
+    # ... 现有配置
+    "MY_NEW_LLM": {
+        "NAME": "my-model-name",  # 或 "model-1,model-2" 支持降级
+        "URL": "https://api.example.com",  # API 端点
+        "KEY": os.getenv("MY_NEW_LLM_KEY")
+    }
+}
+
+# 设置为当前使用的模型
+CURRENT_COMPLETION = "MY_NEW_LLM"
+```
+
+3. 如果 API 格式不兼容 OpenAI，需要修改 `function.py` 中的 `ai_completion()` 函数
+
+### 扩展命令系统
+
+在 `src/qqbot/core/function_cmd.py` 中添加新命令：
+
+```python
+async def handle_command(message_text, data):
+    """处理命令"""
+    if not message_text.startswith("/s"):
+        return None
+
+    # 解析命令
+    parts = message_text[3:].strip().split()
+    command = parts[0] if parts else ""
+    args = parts[1:] if len(parts) > 1 else []
+
+    # 图片搜索命令（已有）
+    if command in ["img", "图片"]:
+        # ... 现有逻辑
+
+    # 新命令：天气查询
+    elif command in ["weather", "天气"]:
+        if not args:
+            return "请提供城市名，例如：/s 天气 北京"
+        city = args[0]
+        weather_info = await get_weather(city)  # 你的天气 API 调用
+        return f"{city}的天气：{weather_info}"
+
+    # 新命令：翻译
+    elif command in ["translate", "翻译"]:
+        if len(args) < 2:
+            return "用法：/s 翻译 <目标语言> <文本>"
+        target_lang = args[0]
+        text = " ".join(args[1:])
+        result = await translate_text(text, target_lang)  # 你的翻译函数
+        return result
+
+    return None
+```
+
+### 添加新的图片源
+
+在 `src/qqbot/core/function_image_providers.py` 中添加新的图片提供商：
+
+```python
+async def fetch_from_new_source(tags: list, is_r18: bool = False):
+    """从新图片源获取图片"""
+    try:
+        # 构建 API 请求
+        url = f"https://api.example.com/search"
+        params = {
+            "tags": "+".join(tags),
+            "rating": "explicit" if is_r18 else "safe"
+        }
+
+        # 发送请求
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params)
+            data = response.json()
+
+        # 解析结果
+        if data.get("results"):
+            image_url = data["results"][0]["url"]
+            return image_url
+    except Exception as e:
+        print(f"❌ 从新图片源获取失败: {e}")
+
+    return None
+
+# 在主函数中添加新源
+async def fetch_image(tags: list, is_r18: bool = False):
+    """依次尝试多个图片源"""
+    sources = [
+        fetch_from_pixiv,
+        fetch_from_yandere,
+        fetch_from_new_source,  # 添加你的新源
+    ]
+
+    for source in sources:
+        result = await source(tags, is_r18)
+        if result:
+            return result
+
+    return None
+```
+
+### 自定义消息处理逻辑
+
+在 `src/qqbot/core/function.py` 中修改 `rep()` 函数：
+
+```python
+async def rep(data):
+    """判断是否回复"""
+    # ... 现有逻辑
+
+    # 添加自定义规则
+    message_text = data.get("raw_message", "")
+
+    # 规则 1：检测关键词
+    keywords = ["帮助", "help", "使用说明"]
+    if any(kw in message_text for kw in keywords):
+        await send_msg(group_id, "命令列表：\n/s img - 图片搜索\n...")
+        return False  # 已处理，不再调用 LLM
+
+    # 规则 2：特殊时段
+    current_hour = datetime.now().hour
+    if 2 <= current_hour < 6:  # 凌晨 2-6 点降低活跃度
+        if random.randint(1, 100) > 1:  # 只有 1% 概率回复
+            return False
+
+    # ... 继续原有逻辑
+```
+
+### 添加定时任务
+
+在 `src/qqbot/core/function_fortune.py` 中添加新的定时任务：
+
+```python
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+
+def setup_custom_scheduler(websocket):
+    """设置自定义定时任务"""
+    scheduler = AsyncIOScheduler()
+
+    # 任务 1：每小时整点提醒
+    async def hourly_reminder():
+        hour = datetime.now().hour
+        message = f"现在是 {hour} 点整"
+        for group_id in config.ALLOWED_GROUPS:
+            await send_msg_via_websocket(websocket, group_id, message)
+
+    scheduler.add_job(
+        hourly_reminder,
+        CronTrigger(hour="*", minute=0),  # 每小时 0 分触发
+        id="hourly_reminder"
+    )
+
+    # 任务 2：每周一早上 9 点发送周报
+    async def weekly_summary():
+        message = "新的一周开始了！"
+        for group_id in config.FORTUNE_GROUPS:
+            await send_msg_via_websocket(websocket, group_id, message)
+
+    scheduler.add_job(
+        weekly_summary,
+        CronTrigger(day_of_week="mon", hour=9, minute=0),
+        id="weekly_summary"
+    )
+
+    scheduler.start()
+    print("✅ 自定义定时任务已启动")
+```
+
+### 调试技巧
+
+#### 启用详细日志
+```python
+# 在 my_proxy.py 开头添加
+import logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)s] %(message)s'
+)
+```
+
+#### 测试单个功能
+```python
+# 测试 AI 完成功能
+from src.qqbot.core.function import ai_completion
+import asyncio
+
+async def test():
+    session_id = "test:12345"
+    user_content = [{"type": "text", "text": "你好"}]
+    response = await ai_completion(session_id, user_content)
+    print(response)
+
+asyncio.run(test())
+```
+
+#### 模拟消息
+```python
+# 模拟群聊消息进行测试
+test_message = {
+    "post_type": "message",
+    "message_type": "group",
+    "group_id": 123456789,
+    "user_id": 987654321,
+    "message_id": 12345,
+    "raw_message": "测试消息",
+    "message": [{"type": "text", "data": {"text": "测试消息"}}]
+}
+
+await on_message(test_message)
+```
+
+---
+
+## 📊 性能优化建议
+
+### 1. 减少 LLM 调用次数
+- 调低 `RAN_REP_PROBABILITY`
+- 优化 AI 判断逻辑，减少不必要的调用
+
+### 2. 优化记忆系统
+- 减小 `CONTEXT_WINDOW`（保留更少的历史消息）
+- 增加 `HISTORY_TIMEOUT`（减少记忆清理频率）
+- 禁用长期记忆（如果不需要）
+
+### 3. 并发处理
+```python
+# 在 my_proxy.py 中，对多个群组的消息并发处理
+async def handle_multiple_groups(messages):
+    tasks = [on_message(msg) for msg in messages]
+    await asyncio.gather(*tasks)
+```
+
+### 4. 连接池优化
+```python
+# 在 config.py 中调整 HTTP 客户端设置
+HTTPX_LIMITS = httpx.Limits(
+    max_connections=200,      # 增加最大连接数
+    max_keepalive_connections=50,
+    keepalive_expiry=30.0
+)
+```
+
+---
+
+## 🤝 贡献指南
+
+欢迎提交 Issue 和 Pull Request！
+
+### 提交代码
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启 Pull Request
+
+### 代码规范
+- 使用 Python PEP 8 风格
+- 添加必要的注释和文档字符串
+- 测试新功能
+
+---
+
+## 📄 许可证
+
+本项目仅供学习和研究使用。
+
+## 🙏 致谢
+
+- 特别感谢 **@novashen666** 的支持与贡献
+- 感谢所有 LLM 提供商的 API 支持
+- 感谢 NapCat 项目提供的 QQ 协议实现
+
+---
+
+## ⚠️ 免责声明
+
+- 本项目仅供学习和研究使用
+- 请遵守相关法律法规和服务条款
+- 请勿用于商业或其他非法用途
+- 使用本项目所产生的一切后果由使用者自行承担
+
+---
+
+<div align="center">
+
+**Made with ❤️ by QQ Bot Framework Contributors**
+
+如有问题或建议，欢迎提交 [Issue](https://github.com/your-repo/issues)
+
+</div>
 

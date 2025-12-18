@@ -3,6 +3,7 @@ import random
 from pathlib import Path
 from typing import List, Tuple
 from PIL import Image, ImageDraw, ImageFont
+from src.qqbot.utils.image_uploader import get_image_url_or_fallback
 
 # ===== 配置 =====
 
@@ -240,9 +241,11 @@ async def send_daily_fortune(websocket, group_id: int, theme: str = "random"):
         # 生成运势卡片
         img_path = drawing(theme)
 
-        # 读取图片
+        # 读取图片并上传（Worker优先，失败用base64）
         with open(img_path, 'rb') as f:
-            img_data = base64.b64encode(f.read()).decode('utf-8')
+            image_bytes = f.read()
+
+        image_file = await get_image_url_or_fallback(image_bytes)
 
         # 发送图片
         await websocket.send(json.dumps({
@@ -251,7 +254,7 @@ async def send_daily_fortune(websocket, group_id: int, theme: str = "random"):
                 "message_type": "group",
                 "group_id": group_id,
                 "message": [
-                    {"type": "image", "data": {"file": f"base64://{img_data}"}}
+                    {"type": "image", "data": {"file": image_file}}
                 ]
             }
         }))

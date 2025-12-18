@@ -239,8 +239,12 @@ async def qq_bot():
                 if event.get("post_type") != "message":
                     continue
 
-                my_event = special_event(event)
+                my_event = await special_event(event)
                 if my_event:
+                    continue
+                    # 如果命令返回了消息，发送它
+                    if my_event.get("message"):
+                        await send_message(ws, my_event)
                     continue
 
                 else:
