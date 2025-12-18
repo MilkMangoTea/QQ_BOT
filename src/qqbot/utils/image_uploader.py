@@ -19,7 +19,7 @@ async def upload_image_bytes_to_worker(
         Uploaded image URL, or None if failed
     """
     worker_url = os.getenv("WORKER_URL")
-    worker_api_key = os.getenv("WORKER_API_KEY")
+    worker_api_key = os.getenv("API_KEY")
 
     if not worker_url or not worker_api_key:
         return None
