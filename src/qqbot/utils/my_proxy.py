@@ -1,7 +1,25 @@
 import asyncio
 import websockets
-from src.qqbot.core.function import *
-from src.qqbot.config.config import *
+import json
+import time
+import httpx
+from src.qqbot.config import config
+from src.qqbot.config.config import FORTUNE_GROUPS
+from src.qqbot.core.function import (
+    process_single_message,
+    get_nearby_message,
+    special_event,
+    rep,
+    build_params_text_only,
+    ran_rep_text_only,
+    build_params,
+    ran_emoji,
+    ran_emoji_content,
+    create_chat_chain_with_memory,
+    get_long_memory_text,
+    MemoryManager,
+    out
+)
 from src.qqbot.core.function_fortune import setup_daily_fortune_scheduler
 from src.qqbot.core.function_long_turn_memory import LocalDictStore
 from src.qqbot.core.function_session_memory import calc_session_id
@@ -139,7 +157,7 @@ async def remember(websocket, event):
             print(f"🔍 首次记忆，正在拉取历史消息...")
             history_msgs = await get_nearby_message(websocket, event, CURRENT_LLM)
             if history_msgs:
-                memory_manager.initialize_with_history(session_id, history_msgs)
+                await memory_manager.initialize_with_history(session_id, history_msgs)
 
         message = event.get("message")
         nickname = event.get("sender").get("nickname")

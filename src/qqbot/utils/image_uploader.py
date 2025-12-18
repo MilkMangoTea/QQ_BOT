@@ -114,15 +114,28 @@ async def upload_image_url_to_worker(image_url: str) -> Optional[str]:
 
 def bytes_to_base64_uri(image_data: bytes) -> str:
     """
-    转换为模型可读的 base64 数据 URI
+    转换为模型可读的 base64 数据 URI（标准格式）
     Args:
         image_data: Raw image bytes
 
     Returns:
-        "base64://..." formatted string
+        "data:image/...;base64,..." formatted string (OpenAI compatible)
     """
     b64_data = base64.b64encode(image_data).decode('utf-8')
-    return f"base64://{b64_data}"
+
+    # 检测 MIME 类型
+    if image_data.startswith(b'\x89PNG\r\n\x1a\n'):
+        mime_type = 'image/png'
+    elif image_data.startswith(b'\xff\xd8\xff'):
+        mime_type = 'image/jpeg'
+    elif image_data[:6] in (b'GIF87a', b'GIF89a'):
+        mime_type = 'image/gif'
+    elif image_data.startswith(b'RIFF') and image_data[8:12] == b'WEBP':
+        mime_type = 'image/webp'
+    else:
+        mime_type = 'image/png'
+
+    return f"data:{mime_type};base64,{b64_data}"
 
 
 async def get_image_url_or_fallback(

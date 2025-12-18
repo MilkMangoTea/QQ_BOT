@@ -1,7 +1,18 @@
-from src.qqbot.core.function_completion import *
-from src.qqbot.core.function_cmd import *
-from src.qqbot.core.function_session_memory import *
 import json
+import random
+from src.qqbot.config import config
+from src.qqbot.core.function_completion import (
+    should_reply_langchain,
+    build_params,
+    create_chat_chain_with_memory,
+    get_long_memory_text
+)
+from src.qqbot.core.function_cmd import special_event
+from src.qqbot.core.function_session_memory import (
+    calc_session_id,
+    MemoryManager
+)
+from src.qqbot.utils.image_uploader import get_image_url_or_fallback
 
 # 随机文字池子
 def ran_rep_text_only():
@@ -118,14 +129,14 @@ async def process_single_message(message, nickname, llm):
             at_prompt += target_prompt
         # 图片
         elif log_type == "image":
-            image_base64 = await url_to_base64(data.get("url"))
-            if image_base64:
+            image_url = await get_image_url_or_fallback(data.get("url"))
+            if image_url:
                 results.append({
                     "role": "user",
                     "content": [
                         {
                             "type": "image_url",
-                            "image_url": {"url": image_base64}
+                            "image_url": {"url": image_url}
                         }
                     ]
                 })

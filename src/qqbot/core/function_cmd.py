@@ -1,5 +1,5 @@
 from src.qqbot.config import config
-from src.qqbot.core.function_image_providers import *
+from src.qqbot.core.function_image_providers import fetch_acg_one
 from src.qqbot.utils.image_uploader import get_image_url_or_fallback
 
 def _extract_cmd_text_from_event(msg_list, prefix="/s"):

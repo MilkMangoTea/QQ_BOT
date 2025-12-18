@@ -56,7 +56,7 @@ class MemoryManager:
         session.touch()
         return session
 
-    def initialize_with_history(
+    async def initialize_with_history(
             self,
             session_id: str,
             messages: List[Dict],
@@ -73,7 +73,7 @@ class MemoryManager:
 
         # 填充历史消息
         from langchain_core.messages import HumanMessage, AIMessage
-        from src.qqbot.core.function_completion import url_to_base64
+        from src.qqbot.utils.image_uploader import get_image_url_or_fallback
 
         for msg in messages[-self._context_window:]:
             try:
@@ -95,14 +95,14 @@ class MemoryManager:
                             text = seg_data.get("text", "")
                             text_parts.append(text)
                         elif seg_type == "image":
-                            # 转换图片为 base64
+                            # 转换图片 URL，上传到 Worker 或使用 base64
                             image_url = seg_data.get("url")
                             if image_url:
-                                image_base64 = url_to_base64(image_url)
-                                if image_base64:
+                                image_final_url = await get_image_url_or_fallback(image_url)
+                                if image_final_url:
                                     content_parts.append({
                                         "type": "image_url",
-                                        "image_url": {"url": image_base64}
+                                        "image_url": {"url": image_final_url}
                                     })
                                 else:
                                     text_parts.append("[图片获取失败]")
