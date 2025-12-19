@@ -4,6 +4,10 @@ import os
 from pathlib import Path
 from typing import Optional, Union
 
+# 全局 URL 上传缓存：{原始URL: CDN URL}
+# 避免重复上传同一张图片（特别是历史消息中的图片）
+_url_upload_cache = {}
+
 async def upload_image_bytes_to_worker(
     image_data: bytes,
     filename: Optional[str] = None
@@ -70,7 +74,7 @@ async def upload_image_bytes_to_worker(
 
 async def upload_image_url_to_worker(image_url: str) -> Optional[str]:
     """
-    上传图片 url 到 Cloudflare Worker
+    上传图片 url 到 Cloudflare Worker（带缓存）
 
     Args:
         image_url: Source image URL (http/https or data URI)
@@ -78,6 +82,12 @@ async def upload_image_url_to_worker(image_url: str) -> Optional[str]:
     Returns:
         Uploaded image CDN URL, or None if failed
     """
+    # 检查缓存，避免重复上传
+    if image_url in _url_upload_cache:
+        cached_url = _url_upload_cache[image_url]
+        print(f"🔄 [Cache] 使用缓存: {image_url[:50]}... -> {cached_url[:50]}...")
+        return cached_url
+
     worker_url = os.getenv("WORKER_URL")
     worker_api_key = os.getenv("API_KEY")
 
@@ -95,8 +105,11 @@ async def upload_image_url_to_worker(image_url: str) -> Optional[str]:
 
             result = response.json()
             if result.get("success"):
-                print(f"✅ [Worker] URL上传成功: {result.get('url')}")
-                return result.get("url")
+                cdn_url = result.get("url")
+                print(f"✅ [Worker] URL上传成功: {cdn_url}")
+
+                _url_upload_cache[image_url] = cdn_url
+                return cdn_url
             else:
                 print(f"⚠️ [Worker] URL上传失败: {result}")
                 return None
