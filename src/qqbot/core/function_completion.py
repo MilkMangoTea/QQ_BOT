@@ -274,34 +274,6 @@ def should_reply_langchain(event: Dict[str, Any], memory_manager, session_id: st
         print(f"⚠️ LangChain 判定失败: {e}")
         return False
 
-
-# 创建带短期+长期记忆的对话链
-def create_chat_chain_with_memory(memory_manager, long_memory_pool, system_prompt, llm_config):
-
-    llm = create_chat_llm(llm_config)
-
-    # 定义 prompt，包含系统提示、长期记忆、短期历史、当前输入
-    # MessagesPlaceholder 支持多模态内容（文本+图片）
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        ("system", "【相关长期记忆】\n{long_memory}"),
-        MessagesPlaceholder(variable_name="history"),
-        MessagesPlaceholder(variable_name="input")
-    ])
-
-    # 构建基础 chain
-    chain = prompt | llm
-
-    # 包装成带短期记忆的 chain
-    chain_with_history = RunnableWithMessageHistory(
-        chain,
-        memory_manager.get_history,
-        input_messages_key="input",
-        history_messages_key="history",
-    )
-
-    return chain_with_history
-
 # 从长期记忆池获取相关记忆并格式化为文本
 def get_long_memory_text(long_memory_pool, user_id, query):
 
@@ -317,3 +289,95 @@ def get_long_memory_text(long_memory_pool, user_id, query):
     except Exception as e:
         print(f"⚠️ 获取长期记忆失败: {e}")
         return "（无）"
+
+# 创建带工具的对话链
+def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prompt, llm_config, tools):
+    from langchain.agents import AgentExecutor, create_react_agent
+    from langchain_core.prompts import PromptTemplate
+
+    llm = create_chat_llm(llm_config)
+
+    # ReAct Agent prompt
+    react_prompt = PromptTemplate.from_template(
+        """{system_prompt}
+
+【相关长期记忆】
+{long_memory}
+
+【历史对话】
+{history}
+
+【当前输入】
+{input}
+
+你可以使用以下工具：
+{tools}
+
+工具名称列表: {tool_names}
+
+回答格式：
+Question: 用户的问题
+Thought: 我的思考
+Action: 工具名（如果需要）
+Action Input: 工具输入（如果需要）
+Observation: 工具结果（系统自动填充）
+Thought: 我现在知道最终答案了
+Final Answer: 最终回复
+
+关键规则：
+1. 数学计算必须用 numpy_calc 工具
+2. 工具返回结果后，立即输出 "Thought: 我现在知道最终答案了" 然后 "Final Answer: ..."
+3. 不需要工具时直接给 Final Answer
+
+{agent_scratchpad}"""
+    )
+
+    agent = create_react_agent(llm, tools, react_prompt)
+
+    agent_executor = AgentExecutor(
+        agent=agent,
+        tools=tools,
+        verbose=True,
+        handle_parsing_errors=True,
+        max_iterations=3,
+        early_stopping_method="generate"
+    )
+
+    def invoke_with_memory(self, inputs, config=None):
+        if config is None:
+            config = {}
+        session_id = config.get("configurable", {}).get("session_id")
+
+        # 获取历史消息列表
+        if session_id:
+            session = memory_manager.get_or_create_session(session_id)
+            history_msgs = session.history.messages if hasattr(session.history, 'messages') else []
+        else:
+            history_msgs = []
+
+        history_text = "\n".join([
+            f"{'用户' if isinstance(msg, HumanMessage) else 'AI'}: {msg.content if isinstance(msg.content, str) else str(msg.content)}"
+            for msg in history_msgs[-10:]
+        ])
+
+        input_msgs = inputs.get("input", [])
+        input_text = ""
+        for msg in input_msgs:
+            if hasattr(msg, 'content'):
+                if isinstance(msg.content, list):
+                    input_text = "\n".join([
+                        p.get("text", "") for p in msg.content if isinstance(p, dict) and p.get("type") == "text"
+                    ])
+                else:
+                    input_text = msg.content
+
+        result = agent_executor.invoke({
+            "system_prompt": system_prompt,
+            "long_memory": inputs.get("long_memory", ""),
+            "history": history_text,
+            "input": input_text,
+        })
+
+        return {"output": result.get("output", "")}
+
+    return type('ChainWithMemory', (), {'invoke': invoke_with_memory})()

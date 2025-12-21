@@ -2,7 +2,6 @@ import asyncio
 import websockets
 import json
 import time
-import httpx
 from src.qqbot.config import config
 from src.qqbot.config.config import FORTUNE_GROUPS
 from src.qqbot.core.function import (
@@ -15,26 +14,18 @@ from src.qqbot.core.function import (
     build_params,
     ran_emoji,
     ran_emoji_content,
-    create_chat_chain_with_memory,
     get_long_memory_text,
     MemoryManager,
     out
 )
+from src.qqbot.core.function_completion import create_agent_chain_with_memory
 from src.qqbot.core.function_fortune import setup_daily_fortune_scheduler
 from src.qqbot.core.function_long_turn_memory import LocalDictStore
 from src.qqbot.core.function_session_memory import calc_session_id
-
-HTTPX_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=20.0)
-HTTPX_TIMEOUT = httpx.Timeout(connect=5.0, read=12.0, write=5.0, pool=5.0)
-HTTP_CLIENT = httpx.Client(limits=HTTPX_LIMITS, timeout=HTTPX_TIMEOUT, http2=True)
+from src.qqbot.core.function_tools import TOOLS
 
 CURRENT_LLM = config.LLM[config.CURRENT_COMPLETION]
 LLM_NAME = CURRENT_LLM["NAME"]
-LLM_BASE_URL = CURRENT_LLM["URL"]
-LLM_KEY = CURRENT_LLM["KEY"]
-
-template_ask_messages = [
-    {"role": "system", "content": [{"type": "text", "text": config.PROMPT[0] + config.PROMPT[config.CURRENT_PROMPT]}]}]
 system_prompt = config.PROMPT[0] + config.PROMPT[config.CURRENT_PROMPT]
 
 memory_pool = LocalDictStore()
@@ -45,6 +36,11 @@ memory_manager = MemoryManager(
 
 # 缓存 chain，避免每次都创建新实例
 _CHAIN_CACHE = {}
+
+def _clear_chain_cache():
+    """清空 chain 缓存"""
+    global _CHAIN_CACHE
+    _CHAIN_CACHE = {}
 
 # 大模型请求器(注意message不能为空!)
 async def ai_completion(session_id, user_content):
@@ -70,16 +66,16 @@ async def ai_completion(session_id, user_content):
 
                 # 使用缓存的 chain
                 if model_name not in _CHAIN_CACHE:
-                    _CHAIN_CACHE[model_name] = create_chat_chain_with_memory(
+                    _CHAIN_CACHE[model_name] = create_agent_chain_with_memory(
                         memory_manager=memory_manager,
                         long_memory_pool=memory_pool,
                         system_prompt=system_prompt,
-                        llm_config=temp_config
+                        llm_config=temp_config,
+                        tools=TOOLS
                     )
                 chain = _CHAIN_CACHE[model_name]
 
-                # 调用 chain（支持图片）
-                # 将 user_content 转换为 HumanMessage
+                # 调用 Agent chain
                 from langchain_core.messages import HumanMessage
                 input_msg = HumanMessage(content=user_content)
                 response = await asyncio.to_thread(
@@ -88,8 +84,12 @@ async def ai_completion(session_id, user_content):
                     config={"configurable": {"session_id": session_id}}
                 )
 
-                # 提取回复内容
-                content = response.content if hasattr(response, 'content') else str(response)
+                # 提取回复内容（Agent 返回格式不同）
+                if isinstance(response, dict):
+                    content = response.get("output", "")
+                else:
+                    content = response.content if hasattr(response, 'content') else str(response)
+
                 if not content:
                     content = "嗯"
 
@@ -259,17 +259,14 @@ async def qq_bot():
 
                 my_event = await special_event(event)
                 if my_event:
-                    continue
-                    # 如果命令返回了消息，发送它
                     if my_event.get("message"):
                         await send_message(ws, my_event)
                     continue
 
-                else:
-                    await remember(ws, event)
+                await remember(ws, event)
 
-                    if rep(event, memory_manager):
-                        await handle_message(ws, event)
+                if rep(event, memory_manager):
+                    await handle_message(ws, event)
 
             except json.JSONDecodeError:
                 print("⚠️ 收到非JSON格式消息")

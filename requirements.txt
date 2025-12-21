@@ -40,3 +40,4 @@ mem0ai
 asyncio
 pillow
 apscheduler
+numpy

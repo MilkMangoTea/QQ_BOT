@@ -4,7 +4,6 @@ from src.qqbot.config import config
 from src.qqbot.core.function_completion import (
     should_reply_langchain,
     build_params,
-    create_chat_chain_with_memory,
     get_long_memory_text
 )
 from src.qqbot.core.function_cmd import special_event
