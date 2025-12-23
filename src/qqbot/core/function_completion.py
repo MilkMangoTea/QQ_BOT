@@ -325,9 +325,9 @@ Thought: 我现在知道最终答案了
 Final Answer: 最终回复
 
 关键规则：
-1. 数学计算必须用 numpy_calc 工具
+1. 只有复杂数学计算（矩阵运算、三角函数、统计分析等）才用 numpy_calc 工具，简单算术（如1+1、2*3）直接回答
 2. 工具返回结果后，立即输出 "Thought: 我现在知道最终答案了" 然后 "Final Answer: ..."
-3. 不需要工具时直接给 Final Answer
+3. 日常对话、闲聊、问候等直接给 Final Answer，不要使用工具
 
 {agent_scratchpad}"""
     )

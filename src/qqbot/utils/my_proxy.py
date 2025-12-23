@@ -90,7 +90,8 @@ async def ai_completion(session_id, user_content):
                 else:
                     content = response.content if hasattr(response, 'content') else str(response)
 
-                if not content:
+                # 过滤掉 Agent 错误信息
+                if not content or "Agent stopped due to" in content:
                     content = "嗯"
 
                 out("短期记忆：", memory_manager.get_or_create_session(session_id).history)
