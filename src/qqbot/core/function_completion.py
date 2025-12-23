@@ -339,14 +339,16 @@ Final Answer: 最终回复
         tools=tools,
         verbose=True,
         handle_parsing_errors=True,
-        max_iterations=3,
-        early_stopping_method="generate"
+        max_iterations=15,
+        early_stopping_method="force"
     )
 
     def invoke_with_memory(self, inputs, config=None):
         if config is None:
             config = {}
-        session_id = config.get("configurable", {}).get("session_id")
+        if not isinstance(config, dict):
+            config = {}
+        session_id = config.get("configurable", {}).get("session_id") if config else None
 
         # 获取历史消息列表
         if session_id:
