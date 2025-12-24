@@ -54,6 +54,19 @@ async def ai_completion(session_id, user_content):
         out("🏁 [ai_completion] 调用 chain, session:", session_id)
         out("📝 [ai_completion] 用户输入:", str(user_content)[:100])
 
+        # 检查当前输入是否有图片
+        has_image = any(isinstance(p, dict) and p.get("type") in ["image_url", "image"] for p in user_content)
+
+        # 检查最近历史中是否有图片（最近3条消息）
+        if not has_image:
+            history = memory_manager.get_history(session_id)
+            for msg in history.messages[-3:]:
+                if hasattr(msg, 'content') and isinstance(msg.content, list):
+                    if any(isinstance(p, dict) and p.get("type") == "image_url" for p in msg.content):
+                        has_image = True
+                        out("🖼️ 检测到历史消息中有图片，使用多模态模式")
+                        break
+
         # 解析候选模型列表
         names = [s.strip() for s in str(LLM_NAME).split(",") if s.strip()]
 
@@ -64,31 +77,44 @@ async def ai_completion(session_id, user_content):
                 temp_config = CURRENT_LLM.copy()
                 temp_config["NAME"] = model_name
 
-                # 使用缓存的 chain
-                if model_name not in _CHAIN_CACHE:
-                    _CHAIN_CACHE[model_name] = create_agent_chain_with_memory(
-                        memory_manager=memory_manager,
-                        long_memory_pool=memory_pool,
-                        system_prompt=system_prompt,
-                        llm_config=temp_config,
-                        tools=TOOLS
-                    )
-                chain = _CHAIN_CACHE[model_name]
+                if has_image:
+                    # 有图片，直接用 LLM 处理（带人格）
+                    from langchain_core.messages import HumanMessage, SystemMessage
+                    from src.qqbot.core.function_completion import create_chat_llm
 
-                # 调用 Agent chain
-                from langchain_core.messages import HumanMessage
-                input_msg = HumanMessage(content=user_content)
-                response = await asyncio.to_thread(
-                    chain.invoke,
-                    {"input": [input_msg], "long_memory": long_mem},
-                    config={"configurable": {"session_id": session_id}}
-                )
+                    llm = create_chat_llm(temp_config)
+                    history = memory_manager.get_history(session_id)
 
-                # 提取回复内容（Agent 返回格式不同）
-                if isinstance(response, dict):
-                    content = response.get("output", "")
-                else:
+                    messages = [SystemMessage(content=system_prompt)]
+                    messages.extend(history.messages)
+                    messages.append(HumanMessage(content=user_content))
+
+                    response = await asyncio.to_thread(llm.invoke, messages)
                     content = response.content if hasattr(response, 'content') else str(response)
+                else:
+                    # 无图片，使用 Agent chain
+                    if model_name not in _CHAIN_CACHE:
+                        _CHAIN_CACHE[model_name] = create_agent_chain_with_memory(
+                            memory_manager=memory_manager,
+                            long_memory_pool=memory_pool,
+                            system_prompt=system_prompt,
+                            llm_config=temp_config,
+                            tools=TOOLS
+                        )
+                    chain = _CHAIN_CACHE[model_name]
+
+                    from langchain_core.messages import HumanMessage
+                    input_msg = HumanMessage(content=user_content)
+                    response = await asyncio.to_thread(
+                        chain.invoke,
+                        {"input": [input_msg], "long_memory": long_mem},
+                        run_config={"configurable": {"session_id": session_id}}
+                    )
+
+                    if isinstance(response, dict):
+                        content = response.get("output", "")
+                    else:
+                        content = response.content if hasattr(response, 'content') else str(response)
 
                 # 过滤掉 Agent 错误信息
                 if not content or "Agent stopped due to" in content:

@@ -297,9 +297,9 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
 
     llm = create_chat_llm(llm_config)
 
-    # ReAct Agent prompt
+    # ReAct Agent prompt - 纯逻辑推理，不带人格
     react_prompt = PromptTemplate.from_template(
-        """{system_prompt}
+        """你是一个智能助手，需要根据用户输入决定是否使用工具，并给出客观回复。
 
 【相关长期记忆】
 {long_memory}
@@ -317,17 +317,18 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
 
 回答格式：
 Question: 用户的问题
-Thought: 我的思考
+Thought: 客观分析（不要带任何角色人格或口癖）
 Action: 工具名（如果需要）
 Action Input: 工具输入（如果需要）
 Observation: 工具结果（系统自动填充）
 Thought: 我现在知道最终答案了
-Final Answer: 最终回复
+Final Answer: 回复内容
 
 关键规则：
-1. 只有复杂数学计算（矩阵运算、三角函数、统计分析等）才用 numpy_calc 工具，简单算术（如1+1、2*3）直接回答
+1. 只有复杂数学计算（矩阵运算、三角函数、统计分析等）才用 numpy_calc 工具，简单算术直接回答
 2. 工具返回结果后，立即输出 "Thought: 我现在知道最终答案了" 然后 "Final Answer: ..."
-3. 日常对话、闲聊、问候等直接给 Final Answer，不要使用工具
+3. 日常对话、闲聊、问候等直接给 Final Answer
+4. Final Answer 必须简洁客观，不要带角色人格
 
 {agent_scratchpad}"""
     )
@@ -339,47 +340,81 @@ Final Answer: 最终回复
         tools=tools,
         verbose=True,
         handle_parsing_errors=True,
-        max_iterations=15,
+        max_iterations=8,
         early_stopping_method="force"
     )
 
-    def invoke_with_memory(self, inputs, config=None):
-        if config is None:
-            config = {}
-        if not isinstance(config, dict):
-            config = {}
-        session_id = config.get("configurable", {}).get("session_id") if config else None
+    class ChainWrapper:
+        def invoke(self, inputs, run_config=None):
+            if run_config is None:
+                run_config = {}
+            if not isinstance(run_config, dict):
+                run_config = {}
+            session_id = run_config.get("configurable", {}).get("session_id") if run_config else None
 
-        # 获取历史消息列表
-        if session_id:
-            session = memory_manager.get_or_create_session(session_id)
-            history_msgs = session.history.messages if hasattr(session.history, 'messages') else []
-        else:
-            history_msgs = []
+            # 获取历史消息列表
+            if session_id:
+                history = memory_manager.get_history(session_id)
+                history_msgs = history.messages
+            else:
+                history_msgs = []
 
-        history_text = "\n".join([
-            f"{'用户' if isinstance(msg, HumanMessage) else 'AI'}: {msg.content if isinstance(msg.content, str) else str(msg.content)}"
-            for msg in history_msgs[-10:]
-        ])
+            # 构建历史文本（忽略图片，只保留文本）
+            history_lines = []
+            for msg in history_msgs:
+                role = '用户' if isinstance(msg, HumanMessage) else 'AI'
+                if isinstance(msg.content, str):
+                    history_lines.append(f"{role}: {msg.content}")
+                elif isinstance(msg.content, list):
+                    text_parts = [p.get("text", "") for p in msg.content if isinstance(p, dict) and p.get("type") == "text"]
+                    if text_parts:
+                        history_lines.append(f"{role}: {''.join(text_parts)}")
+            history_text = "\n".join(history_lines)
 
-        input_msgs = inputs.get("input", [])
-        input_text = ""
-        for msg in input_msgs:
-            if hasattr(msg, 'content'):
-                if isinstance(msg.content, list):
-                    input_text = "\n".join([
-                        p.get("text", "") for p in msg.content if isinstance(p, dict) and p.get("type") == "text"
-                    ])
-                else:
-                    input_text = msg.content
+            # 提取输入文本
+            input_msgs = inputs.get("input", [])
+            input_text = ""
+            for msg in input_msgs:
+                if hasattr(msg, 'content'):
+                    if isinstance(msg.content, list):
+                        input_text = "\n".join([
+                            p.get("text", "") for p in msg.content if isinstance(p, dict) and p.get("type") == "text"
+                        ])
+                    else:
+                        input_text = msg.content
 
-        result = agent_executor.invoke({
-            "system_prompt": system_prompt,
-            "long_memory": inputs.get("long_memory", ""),
-            "history": history_text,
-            "input": input_text,
-        })
+            # Agent 推理（纯逻辑）
+            result = agent_executor.invoke({
+                "long_memory": inputs.get("long_memory", ""),
+                "history": history_text,
+                "input": input_text,
+            })
 
-        return {"output": result.get("output", "")}
+            raw_answer = result.get("output", "")
 
-    return type('ChainWithMemory', (), {'invoke': invoke_with_memory})()
+            # 后处理：应用人格设定
+            if raw_answer and "Agent stopped due to" not in raw_answer:
+                try:
+                    persona_prompt = f"""{system_prompt}
+
+【对话历史】
+{history_text}
+
+【用户当前输入】
+{input_text}
+
+【你的初步回复】
+{raw_answer}
+
+请用你的人格和语气重新表达上述回复，保持核心意思不变，但要符合你的角色设定。直接输出最终回复，不要解释。"""
+
+                    persona_response = llm.invoke(persona_prompt)
+                    final_answer = persona_response.content if hasattr(persona_response, 'content') else str(persona_response)
+                    return {"output": final_answer}
+                except Exception as e:
+                    print(f"⚠️ 人格包装失败: {e}")
+                    return {"output": raw_answer}
+
+            return {"output": raw_answer if raw_answer else "嗯"}
+
+    return ChainWrapper()

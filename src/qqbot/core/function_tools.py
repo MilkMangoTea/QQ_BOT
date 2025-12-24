@@ -16,6 +16,9 @@ def numpy_calc(expression: str) -> str:
         - "np.mean([1,2,3,4,5])" - statistics
     """
     try:
+        # 自动更新弃用的 numpy 函数
+        expression = expression.replace("np.trapz", "np.trapezoid").replace("numpy.trapz", "numpy.trapezoid")
+
         safe_namespace = {
             "np": np,
             "numpy": np,
