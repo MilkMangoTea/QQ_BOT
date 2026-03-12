@@ -64,7 +64,7 @@ async def ai_completion(session_id, user_content):
                 if hasattr(msg, 'content') and isinstance(msg.content, list):
                     if any(isinstance(p, dict) and p.get("type") == "image_url" for p in msg.content):
                         has_image = True
-                        out("🖼️ 检测到历史消息中有图片，使用多模态模式")
+                        out("🖼️ 检测到历史消息中有图片", "使用多模态模式")
                         break
 
         # 解析候选模型列表
@@ -313,6 +313,6 @@ if __name__ == "__main__":
             time.sleep(3)
             continue
 
-        except KeyboardInterrupt:
+        except KeyboardInterrupt:r
             print("🚫 程序已终止")
             break
