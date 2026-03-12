@@ -205,7 +205,7 @@ def create_chat_llm(llm_config):
         api_key=llm_config["KEY"],
         base_url=llm_config["URL"],
         temperature=0.7,
-        timeout=15.0,
+        timeout=60.0,
         max_retries=0,
         http_client=HTTP_CLIENT,
     )

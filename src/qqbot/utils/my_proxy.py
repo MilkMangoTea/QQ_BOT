@@ -313,6 +313,6 @@ if __name__ == "__main__":
             time.sleep(3)
             continue
 
-        except KeyboardInterrupt:r
+        except KeyboardInterrupt:
             print("🚫 程序已终止")
             break
