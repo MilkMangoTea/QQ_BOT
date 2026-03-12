@@ -79,14 +79,40 @@ async def ai_completion(session_id, user_content):
 
                 if has_image:
                     # 有图片，直接用 LLM 处理（带人格）
-                    from langchain_core.messages import HumanMessage, SystemMessage
+                    from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
                     from src.qqbot.core.function_completion import create_chat_llm
 
                     llm = create_chat_llm(temp_config)
                     history = memory_manager.get_history(session_id)
 
+                    # 把历史中相邻的图片消息和文字消息合并：
+                    # 图片单独一条 + 下一条文字 -> 合并为图片+文字一条
+                    raw_msgs = list(history.messages)
+                    merged = []
+                    i = 0
+                    while i < len(raw_msgs):
+                        msg = raw_msgs[i]
+                        if (
+                            isinstance(msg, HumanMessage)
+                            and isinstance(msg.content, list)
+                            and any(isinstance(p, dict) and p.get("type") == "image_url" for p in msg.content)
+                            and not any(isinstance(p, dict) and p.get("type") == "text" for p in msg.content)
+                        ):
+                            # 纯图片消息，尝试与下一条文字消息合并
+                            if (
+                                i + 1 < len(raw_msgs)
+                                and isinstance(raw_msgs[i + 1], HumanMessage)
+                            ):
+                                next_msg = raw_msgs[i + 1]
+                                next_content = next_msg.content if isinstance(next_msg.content, list) else [{"type": "text", "text": next_msg.content}]
+                                merged.append(HumanMessage(content=msg.content + next_content))
+                                i += 2
+                                continue
+                        merged.append(msg)
+                        i += 1
+
                     messages = [SystemMessage(content=system_prompt)]
-                    messages.extend(history.messages)
+                    messages.extend(merged)
                     messages.append(HumanMessage(content=user_content))
 
                     response = await asyncio.to_thread(llm.invoke, messages)
