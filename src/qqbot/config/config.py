@@ -5,7 +5,8 @@ load_dotenv(dotenv_path="/opt/QQ_BOT/my_env/api_key.env")  # 指定绝对路径
 # 配置参数
 
 # 导入的最近消息数量(这个数量至少为1,否则不引入最新内容)
-MESSAGE_COUNT = 10
+# 与 MemoryManager 的 context_window 保持一致，确保完整的上下文
+MESSAGE_COUNT = 30
 
 # 需要监听的目标用户QQ号
 TARGET_USER_ID = int(os.environ.get("MY_QQ_ID"))
@@ -21,6 +22,26 @@ RAN_REP_PROBABILITY = 2
 
 # 回复表情包概率
 RAN_EMOJI_PROBABILITY = 0
+
+# 图片描述 Prompt（用于 Agent 工具调用场景）
+IMAGE_DESCRIPTION_PROMPT = """你是一个精确的图像分析助手。请详细描述图片内容，重点关注：
+
+1. **主要对象**：图中的人物、物体、场景
+2. **文字内容**：所有可见的文字、数字、公式、代码（逐字转录）
+3. **关键细节**：颜色、位置、状态、关系
+4. **技术信息**：如果是图表、代码、公式，详细说明其结构和内容
+
+要求：
+- 直接输出描述，不要前缀（如"这张图片显示..."）
+- 如有文字，必须完整准确地转录
+- 保持客观，不要推测或评价
+- 结构化输出，便于理解
+
+示例格式：
+主要内容：[简要概括]
+文字内容：[逐字转录，如有]
+技术细节：[具体说明，如有]
+"""
 
 # 遗忘时间
 HISTORY_TIMEOUT = 600
@@ -132,7 +153,7 @@ PROMPT = [
 ]
 
 # llm state
-CURRENT_COMPLETION = "AIZEX"
+CURRENT_COMPLETION = "FREEGPT"
 
 LLM = {
     "DEEPSEEK-V3": {
@@ -169,6 +190,11 @@ LLM = {
         "KEY": os.getenv("AIZEX"),
         "URL": "https://a1.aizex.me/v1",
         "NAME": "text-embedding-3-large"
+    },
+    "FREEGPT": {
+        "KEY": os.getenv("FREEGPT"),
+        "URL": "https://newapi.pytrio.asia/v1",
+        "NAME": "gpt-5.5"
     }
 }
 

@@ -91,11 +91,11 @@ HTTPX_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20, k
 HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=10.0)
 HTTP_CLIENT = httpx.Client(limits=HTTPX_LIMITS, timeout=HTTPX_TIMEOUT, http2=True)
 
-# 模型配置
-_DEEPSEEK = config.LLM.get("DEEPSEEK-V3", {})
-_DEEPSEEK_NAME = _DEEPSEEK.get("NAME")
-_DEEPSEEK_URL = _DEEPSEEK.get("URL")
-_DEEPSEEK_KEY = _DEEPSEEK.get("KEY")
+# 模型配置 - 使用主配置而非写死 DeepSeek
+_CURRENT_LLM = config.LLM[config.CURRENT_COMPLETION]
+_LLM_NAME = _CURRENT_LLM.get("NAME")
+_LLM_URL = _CURRENT_LLM.get("URL")
+_LLM_KEY = _CURRENT_LLM.get("KEY")
 
 
 # 提取当前消息文本
@@ -211,15 +211,20 @@ def create_chat_llm(llm_config):
     )
 
 def _make_llm():
-    if not (_DEEPSEEK_NAME and _DEEPSEEK_URL and _DEEPSEEK_KEY):
-        raise RuntimeError("DEEPSEEK(OpenAI-compatible) 未配置：请在 config.LLM['DEEPSEEK-V3'] 中设置 NAME/URL/KEY")
+    if not (_LLM_NAME and _LLM_URL and _LLM_KEY):
+        raise RuntimeError("LLM 未配置：请在 config.LLM 中设置当前模型的 NAME/URL/KEY")
+
+    # 支持多模型 fallback - 取第一个模型用于决策
+    model_name = _LLM_NAME.split(",")[0].strip() if "," in str(_LLM_NAME) else _LLM_NAME
+
     return ChatOpenAI(
-        model=_DEEPSEEK_NAME,
-        api_key=_DEEPSEEK_KEY,
-        base_url=_DEEPSEEK_URL,
+        model=model_name,
+        api_key=_LLM_KEY,
+        base_url=_LLM_URL,
         temperature=0.0,
         timeout=12,
         max_retries=2,
+        http_client=HTTP_CLIENT,
     )
 
 
@@ -254,8 +259,8 @@ def should_reply_langchain(event: Dict[str, Any], memory_manager, session_id: st
     if not curr_text:
         return False
 
-    # 从 MemoryManager 获取最近上下文
-    ctx_lines = memory_manager.get_recent_dialog_lines(session_id, take_n=10, max_chars_per_line=240)
+    # 从 MemoryManager 获取最近上下文（扩大到 20 条以获得更完整的对话背景）
+    ctx_lines = memory_manager.get_recent_dialog_lines(session_id, take_n=20, max_chars_per_line=240)
     ctx = "\n".join(ctx_lines) if ctx_lines else "（无）"
 
     try:
