@@ -265,11 +265,22 @@ def should_reply_langchain(event: Dict[str, Any], memory_manager, session_id: st
 
     try:
         dec = _decision_chain().invoke({"ctx": ctx, "user_message": curr_text})
+
+        # 检查返回值是否为 None 或无效
+        if dec is None:
+            print(f"⚠️ LangChain 返回 None，可能 LLM 输出格式错误")
+            return False
+
+        # 检查是否有必需的属性
+        if not hasattr(dec, 'should_reply'):
+            print(f"⚠️ LangChain 返回对象缺少 should_reply 属性: {type(dec)}")
+            return False
+
         should = bool(dec.should_reply)
         print("LC 判定:", {
             "should": should,
-            "cat": dec.category,
-            "conf": dec.confidence,
+            "cat": getattr(dec, 'category', 'UNKNOWN'),
+            "conf": getattr(dec, 'confidence', 0),
             "curr": curr_text[:48]
         })
         if (dec.confidence or 0) < 0.55 and dec.category != "QUESTION":
