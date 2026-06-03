@@ -198,7 +198,7 @@ _RULES_TEXT = """
 - 综合后在 0~1 内给出合理分值。
 """
 
-_PROMPT = ChatPromptTemplate.from_messages([
+_PROMPT_CHAT = ChatPromptTemplate.from_messages([
     ("system", "{rules}"),
     _FEWSHOT,
     ("human",
@@ -207,6 +207,15 @@ _PROMPT = ChatPromptTemplate.from_messages([
      "只返回 JSON。"
      ),
 ]).partial(rules=_RULES_TEXT)
+
+_PROMPT_RESPONSES = ChatPromptTemplate.from_messages([
+    _FEWSHOT,
+    ("human",
+     "【群聊最近上下文】\n{ctx}\n\n"
+     "【当前消息】\n{user_message}\n"
+     "只返回 JSON。"
+     ),
+])
 
 # 供外部调用
 def create_chat_llm(llm_config, system_instructions=None):
@@ -259,7 +268,11 @@ def _decision_chain():
     global _CACHED_DECISION_CHAIN
     if _CACHED_DECISION_CHAIN is None:
         llm = _make_llm()
-        _CACHED_DECISION_CHAIN = _PROMPT | llm.with_structured_output(Decision)
+        if _CURRENT_LLM.get("USE_RESPONSES_API"):
+            llm = llm.bind(instructions=_RULES_TEXT)
+            _CACHED_DECISION_CHAIN = _PROMPT_RESPONSES | llm.with_structured_output(Decision)
+        else:
+            _CACHED_DECISION_CHAIN = _PROMPT_CHAT | llm.with_structured_output(Decision)
     return _CACHED_DECISION_CHAIN
 
 
@@ -343,10 +356,10 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
 
     if llm_config.get("USE_RESPONSES_API"):
         llm = create_chat_llm(llm_config, system_instructions=system_message)
+        agent_executor = create_react_agent(llm, tools)
     else:
         llm = create_chat_llm(llm_config)
-
-    agent_executor = create_react_agent(llm, tools, prompt=system_message)
+        agent_executor = create_react_agent(llm, tools, prompt=system_message)
 
     class ChainWrapper:
         def invoke(self, inputs, run_config=None):
