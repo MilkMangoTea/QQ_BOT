@@ -194,7 +194,8 @@ LLM = {
     "FREEGPT": {
         "KEY": os.getenv("FREEGPT"),
         "URL": "https://newapi.pytrio.asia/v1",
-        "NAME": "gpt-5.5"
+        "NAME": "gpt-5.5",
+        "USE_RESPONSES_API": True
     }
 }
 

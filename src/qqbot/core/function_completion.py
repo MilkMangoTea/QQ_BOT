@@ -86,12 +86,23 @@ def convert_openai_to_langchain(messages):
     return result
 
 
-# 轻量 httpx Client
+def clean_openai_headers(request: httpx.Request):
+    for key in list(request.headers.keys()):
+        if key.lower().startswith("x-stainless"):
+            del request.headers[key]
+    request.headers["User-Agent"] = "Mozilla/5.0"
+    request.headers["Accept"] = "text/event-stream"
+
 HTTPX_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=20.0)
 HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=10.0)
-HTTP_CLIENT = httpx.Client(limits=HTTPX_LIMITS, timeout=HTTPX_TIMEOUT, http2=True)
+HTTP_CLIENT = httpx.Client(
+    limits=HTTPX_LIMITS,
+    timeout=HTTPX_TIMEOUT,
+    http2=True,
+    event_hooks={"request": [clean_openai_headers]}
+)
 
-# 模型配置 - 使用主配置而非写死 DeepSeek
+# 模型配置
 _CURRENT_LLM = config.LLM[config.CURRENT_COMPLETION]
 _LLM_NAME = _CURRENT_LLM.get("NAME")
 _LLM_URL = _CURRENT_LLM.get("URL")
@@ -199,16 +210,18 @@ _PROMPT = ChatPromptTemplate.from_messages([
 
 # 供外部调用
 def create_chat_llm(llm_config):
-    """根据配置创建 ChatOpenAI 实例"""
-    return ChatOpenAI(
-        model=llm_config["NAME"],
-        api_key=llm_config["KEY"],
-        base_url=llm_config["URL"],
-        temperature=0.7,
-        timeout=60.0,
-        max_retries=0,
-        http_client=HTTP_CLIENT,
-    )
+    kwargs = {
+        "model": llm_config["NAME"],
+        "api_key": llm_config["KEY"],
+        "base_url": llm_config["URL"],
+        "temperature": 0.7,
+        "timeout": 60.0,
+        "max_retries": 0,
+        "http_client": HTTP_CLIENT,
+    }
+    if llm_config.get("USE_RESPONSES_API"):
+        kwargs["use_responses_api"] = True
+    return ChatOpenAI(**kwargs)
 
 def _make_llm():
     if not (_LLM_NAME and _LLM_URL and _LLM_KEY):
@@ -217,15 +230,20 @@ def _make_llm():
     # 支持多模型 fallback - 取第一个模型用于决策
     model_name = _LLM_NAME.split(",")[0].strip() if "," in str(_LLM_NAME) else _LLM_NAME
 
-    return ChatOpenAI(
-        model=model_name,
-        api_key=_LLM_KEY,
-        base_url=_LLM_URL,
-        temperature=0.0,
-        timeout=12,
-        max_retries=2,
-        http_client=HTTP_CLIENT,
-    )
+    kwargs = {
+        "model": model_name,
+        "api_key": _LLM_KEY,
+        "base_url": _LLM_URL,
+        "temperature": 0.0,
+        "timeout": 12,
+        "max_retries": 2,
+        "http_client": HTTP_CLIENT,
+    }
+
+    if _CURRENT_LLM.get("USE_RESPONSES_API"):
+        kwargs["use_responses_api"] = True
+
+    return ChatOpenAI(**kwargs)
 
 
 set_llm_cache(InMemoryCache())
@@ -354,7 +372,7 @@ Final Answer: 回复内容
     agent_executor = AgentExecutor(
         agent=agent,
         tools=tools,
-        verbose=True,
+        verbose=False,
         handle_parsing_errors=True,
         max_iterations=8,
         early_stopping_method="force"
