@@ -18,7 +18,7 @@ from src.qqbot.core.function import (
     MemoryManager,
     out
 )
-from src.qqbot.core.function_completion import create_agent_chain_with_memory
+from src.qqbot.core.function_completion import create_agent_chain_with_memory, lc_message_to_text
 from src.qqbot.core.function_fortune import setup_daily_fortune_scheduler
 from src.qqbot.core.function_long_turn_memory import LocalDictStore
 from src.qqbot.core.function_session_memory import calc_session_id
@@ -114,7 +114,7 @@ async def ai_completion(session_id, user_content):
                                 HumanMessage(content=[{"type": "image_url", "image_url": {"url": image_url}}])
                             ]
                         )
-                    description = desc_response.content if hasattr(desc_response, 'content') else str(desc_response)
+                    description = lc_message_to_text(desc_response).strip()
 
                     # 缓存结果
                     _IMAGE_DESCRIPTION_CACHE[image_url] = description
@@ -236,17 +236,17 @@ async def ai_completion(session_id, user_content):
                     out("✅ 使用模型：", model_name)
 
                     # 异步更新长期记忆
-                    try:
-                        asyncio.create_task(
-                            asyncio.to_thread(
-                                memory_pool.add_turn,
+                    def _safe_add_long_memory():
+                        try:
+                            memory_pool.add_turn(
                                 user_id=user_id,
                                 user_text=user_text,
                                 assistant_text=content
                             )
-                        )
-                    except Exception as e:
-                        print("⚠️ [ai_completion] mem0 add_turn 失败：", e)
+                        except Exception as e:
+                            print("⚠️ [ai_completion] mem0 add_turn 失败：", e)
+
+                    asyncio.create_task(asyncio.to_thread(_safe_add_long_memory))
 
                     return content
 

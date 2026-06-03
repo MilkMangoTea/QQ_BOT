@@ -1,6 +1,7 @@
 import base64
 import urllib.parse
 import re
+import json
 import httpx
 from typing import Any, Dict, List
 from src.qqbot.config import config
@@ -28,6 +29,7 @@ from langchain_core.caches import InMemoryCache
 from langchain_core.globals import set_llm_cache
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.runnables import RunnableLambda
 
 
 _IMG_TYPES = {"image", "img", "photo", "picture", "sticker"}
@@ -127,6 +129,42 @@ class Decision(BaseModel):
     should_reply: bool = Field(description="Whether the bot should reply.")
     category: str = Field(description="FOLLOWUP | QUESTION | CHITCHAT | OTHER | NOISE")
     confidence: float = Field(ge=0, le=1, description="0~1 confidence score")
+
+
+def lc_content_to_text(content) -> str:
+    """兼容 LangChain Responses API 返回的 str / list[dict] content。"""
+    if content is None:
+        return ""
+
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = (
+                    item.get("text")
+                    or item.get("content")
+                    or item.get("delta")
+                    or ""
+                )
+                if isinstance(text, str):
+                    parts.append(text)
+                elif text:
+                    parts.append(lc_content_to_text(text))
+        return "".join(parts)
+
+    if isinstance(content, dict):
+        return lc_content_to_text([content])
+
+    return str(content)
+
+
+def lc_message_to_text(msg) -> str:
+    return lc_content_to_text(getattr(msg, "content", msg))
 
 
 # few-shot 示例
@@ -233,7 +271,7 @@ def create_chat_llm(llm_config, system_instructions=None):
         kwargs["streaming"] = True
         kwargs["default_headers"] = {"User-Agent": "Mozilla/5.0"}
         if system_instructions:
-            kwargs["model_kwargs"] = {"instructions": system_instructions}
+            kwargs["instructions"] = system_instructions
     return ChatOpenAI(**kwargs)
 
 def _make_llm():
@@ -264,15 +302,37 @@ set_llm_cache(InMemoryCache())
 # 缓存 decision chain，避免每次都创建新实例
 _CACHED_DECISION_CHAIN = None
 
+def _extract_message_text(msg) -> str:
+    return lc_message_to_text(msg)
+
+
+def _parse_decision_message(msg) -> Decision:
+    text = lc_message_to_text(msg).strip()
+
+    match = re.search(r"\{.*\}", text, re.S)
+    if not match:
+        raise ValueError(f"LLM 未返回 JSON: {text}")
+
+    data = json.loads(match.group(0))
+
+    if hasattr(Decision, "model_validate"):
+        return Decision.model_validate(data)
+
+    return Decision.parse_obj(data)
+
 def _decision_chain():
     global _CACHED_DECISION_CHAIN
     if _CACHED_DECISION_CHAIN is None:
         llm = _make_llm()
+
         if _CURRENT_LLM.get("USE_RESPONSES_API"):
             llm = llm.bind(instructions=_RULES_TEXT)
-            _CACHED_DECISION_CHAIN = _PROMPT_RESPONSES | llm.with_structured_output(Decision)
+            prompt = _PROMPT_RESPONSES
         else:
-            _CACHED_DECISION_CHAIN = _PROMPT_CHAT | llm.with_structured_output(Decision)
+            prompt = _PROMPT_CHAT
+
+        _CACHED_DECISION_CHAIN = prompt | llm | RunnableLambda(_parse_decision_message)
+
     return _CACHED_DECISION_CHAIN
 
 
@@ -378,24 +438,16 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
             history_lines = []
             for msg in history_msgs:
                 role = '用户' if isinstance(msg, HumanMessage) else 'AI'
-                if isinstance(msg.content, str):
-                    history_lines.append(f"{role}: {msg.content}")
-                elif isinstance(msg.content, list):
-                    text_parts = [p.get("text", "") for p in msg.content if isinstance(p, dict) and p.get("type") == "text"]
-                    if text_parts:
-                        history_lines.append(f"{role}: {''.join(text_parts)}")
+                text = lc_message_to_text(msg)
+                if text:
+                    history_lines.append(f"{role}: {text}")
             history_text = "\n".join(history_lines)
 
             input_msgs = inputs.get("input", [])
             input_text = ""
             for msg in input_msgs:
                 if hasattr(msg, 'content'):
-                    if isinstance(msg.content, list):
-                        input_text = "\n".join([
-                            p.get("text", "") for p in msg.content if isinstance(p, dict) and p.get("type") == "text"
-                        ])
-                    else:
-                        input_text = msg.content
+                    input_text = lc_message_to_text(msg)
 
             long_memory = inputs.get("long_memory", "")
             context = f"【相关长期记忆】\n{long_memory}\n\n【历史对话】\n{history_text}" if long_memory or history_text else ""
@@ -406,10 +458,11 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
 
             raw_answer = ""
             if isinstance(result, dict) and "messages" in result:
-                for msg in result["messages"]:
-                    if hasattr(msg, 'content') and hasattr(msg, 'type') and msg.type == "ai":
-                        raw_answer = msg.content
-                        break
+                for msg in reversed(result["messages"]):
+                    if getattr(msg, "type", None) == "ai":
+                        raw_answer = lc_message_to_text(msg).strip()
+                        if raw_answer:
+                            break
 
             if raw_answer and "Agent stopped due to" not in raw_answer:
                 try:
@@ -427,7 +480,7 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
 请用你的人格和语气重新表达上述回复，保持核心意思不变，但要符合你的角色设定。直接输出最终回复，不要解释。"""
 
                     persona_response = llm.invoke(persona_prompt)
-                    final_answer = persona_response.content if hasattr(persona_response, 'content') else str(persona_response)
+                    final_answer = lc_message_to_text(persona_response).strip()
                     return {"output": final_answer}
                 except Exception as e:
                     print(f"⚠️ 人格包装失败: {e}")
