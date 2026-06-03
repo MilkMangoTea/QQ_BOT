@@ -12,10 +12,15 @@ from src.qqbot.config.config import SELF_USER_ID
 class SessionMemory:
     history: BaseChatMessageHistory = field(default_factory=ChatMessageHistory)
     last_update_time: float = field(default_factory=time.time)
+    last_proactive_reply_time: float = 0.0  # 上次主动插话的时间
     is_initialized: bool = False
 
     def touch(self) -> None:
         self.last_update_time = time.time()
+
+    def mark_proactive_reply(self) -> None:
+        """标记一次主动回复"""
+        self.last_proactive_reply_time = time.time()
 
     def is_expired(self, timeout: Optional[float]) -> bool:
         if not timeout or timeout <= 0:
@@ -227,6 +232,31 @@ class MemoryManager:
     def is_session_initialized(self, session_id: str) -> bool:
         session = self._sessions.get(session_id)
         return session is not None and session.is_initialized
+
+    # 检查最近是否有主动回复（用于冷却）
+    def recent_bot_proactive_reply(self, session_id: str, within_seconds: float = 300) -> bool:
+        """
+        检查在 within_seconds 秒内是否有过主动回复
+        :param session_id: 会话 ID
+        :param within_seconds: 时间窗口（秒）
+        :return: True 表示冷却中，False 表示可以主动回复
+        """
+        session = self._sessions.get(session_id)
+        if not session:
+            return False
+
+        if session.last_proactive_reply_time == 0.0:
+            return False
+
+        elapsed = time.time() - session.last_proactive_reply_time
+        return elapsed < within_seconds
+
+    # 标记主动回复
+    def mark_proactive_reply(self, session_id: str) -> None:
+        """标记一次主动回复，用于冷却计时"""
+        session = self._sessions.get(session_id)
+        if session:
+            session.mark_proactive_reply()
 
     # 手动重置会话
     def reset_session(self, session_id: str) -> SessionMemory:

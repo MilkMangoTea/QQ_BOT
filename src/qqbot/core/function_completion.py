@@ -28,6 +28,7 @@ from langchain_core.prompts import ChatPromptTemplate, FewShotChatMessagePromptT
 from langchain_core.caches import InMemoryCache
 from langchain_core.globals import set_llm_cache
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.runnables import RunnableLambda
 
@@ -127,7 +128,9 @@ def _extract_text(event) -> str | None:
 # LangChain 结构化输出定义
 class Decision(BaseModel):
     should_reply: bool = Field(description="Whether the bot should reply.")
-    category: str = Field(description="FOLLOWUP | QUESTION | CHITCHAT | OTHER | NOISE")
+    category: str = Field(description="FOLLOWUP | QUESTION | CHITCHAT | TOPIC | OTHER | NOISE")
+    target: str = Field(description="BOT | OTHER_USER | GROUP | UNKNOWN")
+    interest: float = Field(ge=0, le=1, description="0~1 interest score for proactive participation")
     confidence: float = Field(ge=0, le=1, description="0~1 confidence score")
 
 
@@ -169,17 +172,77 @@ def lc_message_to_text(msg) -> str:
 
 # few-shot 示例
 _EXAMPLES = [
+    # 正例：应该回复的情况
     {
         "input": "上下文: 在聊代理设置。 当前消息: Mac上怎么全局代理？",
-        "output": {"should_reply": True, "category": "QUESTION", "confidence": 0.9}
+        "output": {
+            "should_reply": True,
+            "category": "QUESTION",
+            "target": "GROUP",
+            "interest": 0.8,
+            "confidence": 0.9
+        }
     },
     {
-        "input": "上下文: 机器人刚给了步骤。 当前消息: 证书在哪导入？",
-        "output": {"should_reply": True, "category": "FOLLOWUP", "confidence": 0.9}
+        "input": "上下文: 机器人刚给了步骤。 当前消息: 那证书在哪导入？",
+        "output": {
+            "should_reply": True,
+            "category": "FOLLOWUP",
+            "target": "BOT",
+            "interest": 0.7,
+            "confidence": 0.9
+        }
+    },
+    {
+        "input": "上下文: 群里在讨论大模型本地部署、显存和量化。 当前消息: 你们觉得 7B 现在还有必要本地跑吗？",
+        "output": {
+            "should_reply": True,
+            "category": "TOPIC",
+            "target": "GROUP",
+            "interest": 0.9,
+            "confidence": 0.82
+        }
+    },
+    # 负例：不应该回复的情况
+    {
+        "input": "上下文: 群友A说自己买了新键盘。 当前消息: 你在哪买的？",
+        "output": {
+            "should_reply": False,
+            "category": "QUESTION",
+            "target": "OTHER_USER",
+            "interest": 0.2,
+            "confidence": 0.9
+        }
+    },
+    {
+        "input": "上下文: 群友们在闲聊。 当前消息: 真的假的？",
+        "output": {
+            "should_reply": False,
+            "category": "QUESTION",
+            "target": "UNKNOWN",
+            "interest": 0.1,
+            "confidence": 0.85
+        }
+    },
+    {
+        "input": "上下文: 群友A吐槽游戏更新。 当前消息: 这版本怎么这么抽象？",
+        "output": {
+            "should_reply": False,
+            "category": "QUESTION",
+            "target": "GROUP",
+            "interest": 0.45,
+            "confidence": 0.8
+        }
     },
     {
         "input": "上下文: 无。 当前消息: ？？？",
-        "output": {"should_reply": False, "category": "NOISE", "confidence": 0.85}
+        "output": {
+            "should_reply": False,
+            "category": "NOISE",
+            "target": "UNKNOWN",
+            "interest": 0.0,
+            "confidence": 0.85
+        }
     }
 ]
 _example_prompt = ChatPromptTemplate.from_messages([
@@ -199,40 +262,56 @@ def _build_fewshot():
 _FEWSHOT = _build_fewshot()
 
 _RULES_TEXT = """
-你是“群聊消息路由器”。目标：基于上下文与当前消息，按【猫娘】人设判断此刻是否应该发言。
+你是”群聊消息路由器”。目标：基于上下文与当前消息，按【猫娘】人设判断此刻是否应该发言。
 只返回 JSON，键固定且唯一：
-{"should_reply": true/false, "category": "FOLLOWUP|QUESTION|CHITCHAT|OTHER|NOISE", "confidence": 0~1}
+{“should_reply”: true/false, “category”: “...”, “target”: “...”, “interest”: 0~1, “confidence”: 0~1}
 不要输出解释、前后缀或多余文本。
 
 【人设基调】
-- 名为 MilkMangoTower,但 mmt 并不是名字的缩写,轻松俏皮、略傲娇；偏短句，偶尔口癖（如“喵/～”）。愿意接轻社交与情绪安抚，但不强行插话。
+- 名为 MilkMangoTower，但 mmt 并不是名字的缩写，轻松俏皮、略傲娇；偏短句，偶尔口癖（如”喵/～”）。愿意接轻社交与情绪安抚，但不强行插话。
 
-【优先回复（强触发）】
-1) 明确问题/求助，能给具体解法或方向（如“怎么/为何/能否/在哪设置”等）。
-2) 对机器人先前内容的追问、澄清、继续推进（FOLLOWUP）。
-3) 有明确情绪需要安抚或鼓励（沮丧、道歉、感谢、祝福），且与最近上下文有关联。
+【核心原则】
+群聊中默认不回复。不要把”问句”自动视为需要机器人回答。
+必须先判断当前消息的对话对象 target：
+- BOT：明确 @ 机器人、叫机器人名字、回复机器人上一条消息、或明显在问机器人。
+- OTHER_USER：明显在问某个群友、接另一个人的话、点名他人。
+- GROUP：向整个群开放讨论，没有特定对象。
+- UNKNOWN：对象不明确。
 
-【可选回复（弱触发，视上下文而定）】
-- 轻社交寒暄、玩梗、致谢、简短互动，若与最近话题或人设有明显关联（CHITCHAT）。
+【被动答疑】
+只有 target=BOT 时，普通问题/求助才应该回复。
 
-【不回复（强抑制）】
-- 无信息量或扰动：纯无意义符号/重复标点/口水（例如“？？？”，“……”），刷屏，广告拉群。
+【主动参与】
+target=GROUP 且话题有趣、有增量、适合机器人角色时，可以参与。
+但不要因为一句普通问句就抢答。
+主动参与应当克制，宁缺毋滥。
+
+【不回复】
+- target=OTHER_USER 的问题。
+- target=UNKNOWN 的短问句，例如”啥？”，”真的假的？”，”为啥？”，”谁知道？”
+- 群友之间的普通问答。
+- 普通附和、短感叹、口水话。
+- 无信息量或扰动：纯无意义符号/重复标点（例如”？？？”，”……”），刷屏，广告拉群。
 - 与当前话题和人设无关的长篇争论或敏感对立话题（非安抚/纠偏场景）。
 - 纯转发或模板通知，机器人难以增量提供价值。
-- 没有明确对话对象（如你），大概率与其他人交流。
-- 明确说明不要回复
+- 明确说明不要回复。
 
 【分类口径】
 - FOLLOWUP：基于机器人近期输出的继续追问/澄清/推进。
 - QUESTION：明确求助/问题。
+- TOPIC：有深度或技术性的话题讨论，适合机器人贡献见解。
 - CHITCHAT：寒暄、玩笑、致谢、祝福、轻度感叹或情绪交流。
-- OTHER：与主题相关但不符合以上三类，且不属于噪音。
+- OTHER：与主题相关但不符合以上分类，且不属于噪音。
 - NOISE：广告/刷屏/无信息量/与上下文完全脱节的扰动。
 
-【信心分参考（仅作打分倾向）】
-- 明确问题 +0.30；FOLLOWUP +0.30；情绪安抚/致谢且有关联 +0.20；轻社交有关联 +0.15；
-- 明显无关 -0.30；噪音/广告 -0.40；
-- 倾向短句：若是长段无问句且无明确诉求，可 -0.10；
+【interest 评分（用于主动参与判断）】
+- 技术深度话题 +0.4；有趣梗或创意讨论 +0.3；情绪安抚需求 +0.2；
+- 普通闲聊 +0.1；明显无关 -0.3；噪音/广告 -0.4；
+- 综合后在 0~1 内给出合理分值。
+
+【confidence 评分】
+- 明确问题/FOLLOWUP +0.3；情绪安抚/致谢且有关联 +0.2；
+- 明显无关 -0.3；噪音/广告 -0.4；
 - 综合后在 0~1 内给出合理分值。
 """
 
@@ -342,6 +421,7 @@ def should_reply_langchain(event: Dict[str, Any], memory_manager, session_id: st
     - 图片-only：直接 False（仅依据分段 type）
     - 无文本：直接 False
     - 其余交给 LangChain 结构化输出链
+    - 添加主动参与冷却机制
     """
     try:
         if is_image_only_event(event):
@@ -372,15 +452,45 @@ def should_reply_langchain(event: Dict[str, Any], memory_manager, session_id: st
             return False
 
         should = bool(dec.should_reply)
+        target = getattr(dec, 'target', 'UNKNOWN')
+        category = getattr(dec, 'category', 'UNKNOWN')
+        interest = getattr(dec, 'interest', 0.0)
+        confidence = getattr(dec, 'confidence', 0.0)
+
         print("LC 判定:", {
             "should": should,
-            "cat": getattr(dec, 'category', 'UNKNOWN'),
-            "conf": getattr(dec, 'confidence', 0),
+            "target": target,
+            "cat": category,
+            "interest": interest,
+            "conf": confidence,
             "curr": curr_text[:48]
         })
-        if (dec.confidence or 0) < 0.55 and dec.category != "QUESTION":
+
+        # 如果模型判定不应该回复，直接返回 False
+        if not should:
             return False
-        return should
+
+        # 被动答疑：target=BOT 时可以回复
+        directed_to_bot = (target == "BOT")
+
+        # 主动参与：target=GROUP 且 category 属于可主动参与的类型
+        proactive_categories = {"TOPIC", "CHITCHAT", "OTHER"}
+        is_proactive = (target == "GROUP" and category in proactive_categories)
+
+        # 如果是主动参与，检查冷却
+        if is_proactive and not directed_to_bot:
+            if memory_manager.recent_bot_proactive_reply(session_id, within_seconds=300):
+                print("🔇 主动参与冷却中，跳过回复")
+                return False
+            # 通过冷却检查，标记本次为主动回复
+            memory_manager.mark_proactive_reply(session_id)
+
+        # 置信度过滤
+        if confidence < 0.55 and category not in {"QUESTION", "FOLLOWUP"}:
+            return False
+
+        return True
+
     except Exception as e:
         print(f"⚠️ LangChain 判定失败: {e}")
         return False
@@ -404,9 +514,10 @@ def get_long_memory_text(long_memory_pool, user_id, query):
 # 创建带工具的对话链
 def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prompt, llm_config, tools):
     from langgraph.prebuilt import create_react_agent
-    from langchain_core.messages import SystemMessage
+    from langchain_core.messages import SystemMessage, RemoveMessage
+    from langchain_core.runnables import RunnableLambda
 
-    system_message = """你是一个智能助手，需要根据用户输入决定是否使用工具，并给出客观回复。
+    agent_system_message = """你是一个智能助手，需要根据用户输入决定是否使用工具，并给出客观回复。
 
 关键规则：
 1. 只有复杂数学计算（矩阵运算、三角函数、统计分析等）才用 numpy_calc 工具，简单算术直接回答
@@ -415,11 +526,73 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
 4. 回复必须简洁客观，不要带角色人格"""
 
     if llm_config.get("USE_RESPONSES_API"):
-        llm = create_chat_llm(llm_config, system_instructions=system_message)
-        agent_executor = create_react_agent(llm, tools)
+        # Responses API 模式：需要过滤 SystemMessage
+        # 1. 提取 Agent 默认的工具调用指令（LangGraph 会自动生成）
+        # 2. 合并到 instructions 中
+
+        # LangGraph 的默认 ReAct prompt 模板
+        react_instructions = """You are a helpful assistant with access to tools. Use tools when necessary.
+
+When you need to use a tool:
+1. Think about which tool to use
+2. Call the tool with appropriate arguments
+3. Use the tool's response to answer the user
+
+Available tools will be provided in the function calling format."""
+
+        combined_instructions = f"{agent_system_message}\n\n{react_instructions}"
+
+        # 3. 创建基础 LLM（带 instructions）
+        base_llm = create_chat_llm(llm_config, system_instructions=combined_instructions)
+
+        # 4. 包装 LLM：过滤所有 SystemMessage
+        class ResponsesAPILLMWrapper(Runnable):
+            """包装器：在调用前过滤掉 SystemMessage，继承 Runnable 以支持链式操作"""
+            def __init__(self, base_llm):
+                super().__init__()
+                self.base_llm = base_llm
+
+            def bind_tools(self, tools, **kwargs):
+                """绑定工具，返回新的包装实例"""
+                bound_llm = self.base_llm.bind_tools(tools, **kwargs)
+                return ResponsesAPILLMWrapper(bound_llm)
+
+            def with_structured_output(self, *args, **kwargs):
+                """结构化输出"""
+                structured_llm = self.base_llm.with_structured_output(*args, **kwargs)
+                return ResponsesAPILLMWrapper(structured_llm)
+
+            def invoke(self, messages, config: RunnableConfig = None, **kwargs):
+                """过滤 SystemMessage 后调用"""
+                if isinstance(messages, list):
+                    filtered = [msg for msg in messages if not isinstance(msg, SystemMessage)]
+                else:
+                    filtered = messages
+                return self.base_llm.invoke(filtered, config=config, **kwargs)
+
+            async def ainvoke(self, messages, config: RunnableConfig = None, **kwargs):
+                """异步版本"""
+                if isinstance(messages, list):
+                    filtered = [msg for msg in messages if not isinstance(msg, SystemMessage)]
+                else:
+                    filtered = messages
+                return await self.base_llm.ainvoke(filtered, config=config, **kwargs)
+
+            def __getattr__(self, name):
+                """代理其他属性到 base_llm"""
+                return getattr(self.base_llm, name)
+
+        llm_wrapped = ResponsesAPILLMWrapper(base_llm)
+
+        # 5. 创建 Agent（不传 prompt，使用包装后的 LLM）
+        agent_executor = create_react_agent(llm_wrapped, tools)
+
+        # 用于 persona 包装的 LLM（使用原始的 base_llm，不需要过滤 SystemMessage）
+        persona_llm = base_llm
     else:
         llm = create_chat_llm(llm_config)
-        agent_executor = create_react_agent(llm, tools, prompt=system_message)
+        agent_executor = create_react_agent(llm, tools, prompt=agent_system_message)
+        persona_llm = llm
 
     class ChainWrapper:
         def invoke(self, inputs, run_config=None):
@@ -479,7 +652,7 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
 
 请用你的人格和语气重新表达上述回复，保持核心意思不变，但要符合你的角色设定。直接输出最终回复，不要解释。"""
 
-                    persona_response = llm.invoke(persona_prompt)
+                    persona_response = persona_llm.invoke(persona_prompt)
                     final_answer = lc_message_to_text(persona_response).strip()
                     return {"output": final_answer}
                 except Exception as e:
