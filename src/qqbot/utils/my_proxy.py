@@ -227,6 +227,10 @@ async def ai_completion(session_id, user_content):
                     else:
                         content = response.content if hasattr(response, 'content') else str(response)
 
+                    # 确保 content 是纯文本，不含 Responses API 的 item id
+                    content = lc_message_to_text(content) if not isinstance(content, str) else content
+                    content = content.strip() if content else ""
+
                     # 过滤掉 Agent 错误信息
                     if not content or "Agent stopped due to" in content:
                         content = "嗯"
