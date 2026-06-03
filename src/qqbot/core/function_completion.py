@@ -21,7 +21,7 @@ def build_params(type, event, content):
     return {**base, "message_type": msg_type, key: event[key]}
 
 # ===== LangChain 相关 =====
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate, MessagesPlaceholder
 from langchain_core.caches import InMemoryCache
