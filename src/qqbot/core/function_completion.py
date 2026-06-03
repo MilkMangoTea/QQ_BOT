@@ -28,7 +28,6 @@ from langchain_core.prompts import ChatPromptTemplate, FewShotChatMessagePromptT
 from langchain_core.caches import InMemoryCache
 from langchain_core.globals import set_llm_cache
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.runnables import RunnableLambda
 
@@ -348,7 +347,6 @@ def create_chat_llm(llm_config, system_instructions=None):
     if llm_config.get("USE_RESPONSES_API"):
         kwargs["use_responses_api"] = True
         kwargs["streaming"] = True
-        kwargs["model_kwargs"] = {"store": True}  # 通过 model_kwargs 传递 store 参数
         kwargs["default_headers"] = {"User-Agent": "Mozilla/5.0"}
         if system_instructions:
             kwargs["instructions"] = system_instructions
@@ -372,7 +370,6 @@ def _make_llm():
     if _CURRENT_LLM.get("USE_RESPONSES_API"):
         kwargs["use_responses_api"] = True
         kwargs["streaming"] = True
-        kwargs["model_kwargs"] = {"store": True}  # 通过 model_kwargs 传递 store 参数
         kwargs["default_headers"] = {"User-Agent": "Mozilla/5.0"}
 
     return ChatOpenAI(**kwargs)
@@ -420,19 +417,15 @@ def _decision_chain():
 # LangChain 判定
 def should_reply_langchain(event: Dict[str, Any], memory_manager, session_id: str) -> bool:
     """
-    - 图片-only：直接 False（仅依据分段 type）
-    - 无文本：直接 False
-    - 其余交给 LangChain 结构化输出链
+    - 纯图片消息：不主动回复（返回 False，除非被 @ 或私聊）
+    - 无文本且无图片：跳过
+    - 其余交给 LangChain 结构化输出链判定
     - 添加主动参与冷却机制
     """
-    try:
-        if is_image_only_event(event):
-            print("跳过：图片-only/无有效文本")
-            return False
-    except Exception:
-        pass
-
     curr_text = _extract_text(event)
+
+    # 如果没有文本，直接返回 False（包括纯图片）
+    # 纯图片只有在被 @ 或私聊时才会被处理（由 function.py 的 rep() 控制）
     if not curr_text:
         return False
 
@@ -516,10 +509,19 @@ def get_long_memory_text(long_memory_pool, user_id, query):
 # 创建带工具的对话链
 def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prompt, llm_config, tools):
     from langgraph.prebuilt import create_react_agent
-    from langchain_core.messages import SystemMessage, RemoveMessage
-    from langchain_core.runnables import RunnableLambda
+    from langchain_core.messages import SystemMessage
 
-    agent_system_message = """你是一个智能助手，需要根据用户输入决定是否使用工具，并给出客观回复。
+    # 检查是否使用 Responses API
+    if llm_config.get("USE_RESPONSES_API"):
+        # Responses API 模式：不支持工具调用，回退到简单模式
+        print("⚠️ Responses API 模式暂不支持工具调用，使用简单 LLM 模式")
+        llm = create_chat_llm(llm_config)
+        # 不创建 Agent，直接使用 LLM
+        agent_executor = None
+        persona_llm = llm
+    else:
+        # 普通模式：支持工具调用
+        agent_system_message = """你是一个智能助手，需要根据用户输入决定是否使用工具，并给出客观回复。
 
 关键规则：
 1. 只有复杂数学计算（矩阵运算、三角函数、统计分析等）才用 numpy_calc 工具，简单算术直接回答
@@ -527,71 +529,6 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
 3. 日常对话、闲聊、问候等直接回复
 4. 回复必须简洁客观，不要带角色人格"""
 
-    if llm_config.get("USE_RESPONSES_API"):
-        # Responses API 模式：需要过滤 SystemMessage
-        # 1. 提取 Agent 默认的工具调用指令（LangGraph 会自动生成）
-        # 2. 合并到 instructions 中
-
-        # LangGraph 的默认 ReAct prompt 模板
-        react_instructions = """You are a helpful assistant with access to tools. Use tools when necessary.
-
-When you need to use a tool:
-1. Think about which tool to use
-2. Call the tool with appropriate arguments
-3. Use the tool's response to answer the user
-
-Available tools will be provided in the function calling format."""
-
-        combined_instructions = f"{agent_system_message}\n\n{react_instructions}"
-
-        # 3. 创建基础 LLM（带 instructions）
-        base_llm = create_chat_llm(llm_config, system_instructions=combined_instructions)
-
-        # 4. 包装 LLM：过滤所有 SystemMessage
-        class ResponsesAPILLMWrapper(Runnable):
-            """包装器：在调用前过滤掉 SystemMessage，继承 Runnable 以支持链式操作"""
-            def __init__(self, base_llm):
-                super().__init__()
-                self.base_llm = base_llm
-
-            def bind_tools(self, tools, **kwargs):
-                """绑定工具，返回新的包装实例"""
-                bound_llm = self.base_llm.bind_tools(tools, **kwargs)
-                return ResponsesAPILLMWrapper(bound_llm)
-
-            def with_structured_output(self, *args, **kwargs):
-                """结构化输出"""
-                structured_llm = self.base_llm.with_structured_output(*args, **kwargs)
-                return ResponsesAPILLMWrapper(structured_llm)
-
-            def invoke(self, messages, config: RunnableConfig = None, **kwargs):
-                """过滤 SystemMessage 后调用"""
-                if isinstance(messages, list):
-                    filtered = [msg for msg in messages if not isinstance(msg, SystemMessage)]
-                else:
-                    filtered = messages
-                return self.base_llm.invoke(filtered, config=config, **kwargs)
-
-            async def ainvoke(self, messages, config: RunnableConfig = None, **kwargs):
-                """异步版本"""
-                if isinstance(messages, list):
-                    filtered = [msg for msg in messages if not isinstance(msg, SystemMessage)]
-                else:
-                    filtered = messages
-                return await self.base_llm.ainvoke(filtered, config=config, **kwargs)
-
-            def __getattr__(self, name):
-                """代理其他属性到 base_llm"""
-                return getattr(self.base_llm, name)
-
-        llm_wrapped = ResponsesAPILLMWrapper(base_llm)
-
-        # 5. 创建 Agent（不传 prompt，使用包装后的 LLM）
-        agent_executor = create_react_agent(llm_wrapped, tools)
-
-        # 用于 persona 包装的 LLM（使用原始的 base_llm，不需要过滤 SystemMessage）
-        persona_llm = base_llm
-    else:
         llm = create_chat_llm(llm_config)
         agent_executor = create_react_agent(llm, tools, prompt=agent_system_message)
         persona_llm = llm
@@ -629,6 +566,26 @@ Available tools will be provided in the function calling format."""
 
             full_input = f"{context}\n\n{input_text}" if context else input_text
 
+            # 如果没有 agent（Responses API 模式），直接用带角色的 LLM 回复
+            if agent_executor is None:
+                try:
+                    # Responses API 模式：直接用角色人格回复，不需要"客观回复"中间步骤
+                    prompt = f"""{system_prompt}
+
+【对话历史】
+{history_text}
+
+【用户当前输入】
+{input_text}"""
+
+                    llm_response = persona_llm.invoke(prompt)
+                    final_answer = lc_message_to_text(llm_response).strip()
+                    return {"output": final_answer or "嗯"}
+                except Exception as e:
+                    print(f"⚠️ LLM 调用失败: {e}")
+                    return {"output": "抱歉，处理失败了"}
+
+            # 有 agent 的情况：调用工具链
             result = agent_executor.invoke({"messages": [("user", full_input)]})
 
             raw_answer = ""

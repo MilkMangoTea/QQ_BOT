@@ -15,8 +15,6 @@ def numpy_calc(expression: str) -> str:
         - "np.sin(np.pi/2)" - trigonometry
         - "np.mean([1,2,3,4,5])" - statistics
     """
-    print(f"🔧 [TOOL CALLED] numpy_calc 被调用！")
-    print(f"   表达式: {expression}")
     try:
         # 自动更新弃用的 numpy 函数
         expression = expression.replace("np.trapz", "np.trapezoid").replace("numpy.trapz", "numpy.trapezoid")
