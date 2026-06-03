@@ -328,57 +328,20 @@ def get_long_memory_text(long_memory_pool, user_id, query):
 
 # 创建带工具的对话链
 def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prompt, llm_config, tools):
-    from langchain.agents import AgentExecutor, create_react_agent
-    from langchain_core.prompts import PromptTemplate
+    from langgraph.prebuilt import create_react_agent
+    from langchain_core.messages import SystemMessage
 
     llm = create_chat_llm(llm_config)
 
-    # ReAct Agent prompt - 纯逻辑推理，不带人格
-    react_prompt = PromptTemplate.from_template(
-        """你是一个智能助手，需要根据用户输入决定是否使用工具，并给出客观回复。
-
-【相关长期记忆】
-{long_memory}
-
-【历史对话】
-{history}
-
-【当前输入】
-{input}
-
-你可以使用以下工具：
-{tools}
-
-工具名称列表: {tool_names}
-
-回答格式：
-Question: 用户的问题
-Thought: 客观分析（不要带任何角色人格或口癖）
-Action: 工具名（如果需要）
-Action Input: 工具输入（如果需要）
-Observation: 工具结果（系统自动填充）
-Thought: 我现在知道最终答案了
-Final Answer: 回复内容
+    system_message = """你是一个智能助手，需要根据用户输入决定是否使用工具，并给出客观回复。
 
 关键规则：
 1. 只有复杂数学计算（矩阵运算、三角函数、统计分析等）才用 numpy_calc 工具，简单算术直接回答
-2. 工具返回结果后，立即输出 "Thought: 我现在知道最终答案了" 然后 "Final Answer: ..."
-3. 日常对话、闲聊、问候等直接给 Final Answer
-4. Final Answer 必须简洁客观，不要带角色人格
+2. 工具返回结果后，直接给出最终回复
+3. 日常对话、闲聊、问候等直接回复
+4. 回复必须简洁客观，不要带角色人格"""
 
-{agent_scratchpad}"""
-    )
-
-    agent = create_react_agent(llm, tools, react_prompt)
-
-    agent_executor = AgentExecutor(
-        agent=agent,
-        tools=tools,
-        verbose=False,
-        handle_parsing_errors=True,
-        max_iterations=8,
-        early_stopping_method="force"
-    )
+    agent_executor = create_react_agent(llm, tools, state_modifier=system_message)
 
     class ChainWrapper:
         def invoke(self, inputs, run_config=None):
@@ -388,14 +351,12 @@ Final Answer: 回复内容
                 run_config = {}
             session_id = run_config.get("configurable", {}).get("session_id") if run_config else None
 
-            # 获取历史消息列表
             if session_id:
                 history = memory_manager.get_history(session_id)
                 history_msgs = history.messages
             else:
                 history_msgs = []
 
-            # 构建历史文本（忽略图片，只保留文本）
             history_lines = []
             for msg in history_msgs:
                 role = '用户' if isinstance(msg, HumanMessage) else 'AI'
@@ -407,7 +368,6 @@ Final Answer: 回复内容
                         history_lines.append(f"{role}: {''.join(text_parts)}")
             history_text = "\n".join(history_lines)
 
-            # 提取输入文本
             input_msgs = inputs.get("input", [])
             input_text = ""
             for msg in input_msgs:
@@ -419,16 +379,20 @@ Final Answer: 回复内容
                     else:
                         input_text = msg.content
 
-            # Agent 推理（纯逻辑）
-            result = agent_executor.invoke({
-                "long_memory": inputs.get("long_memory", ""),
-                "history": history_text,
-                "input": input_text,
-            })
+            long_memory = inputs.get("long_memory", "")
+            context = f"【相关长期记忆】\n{long_memory}\n\n【历史对话】\n{history_text}" if long_memory or history_text else ""
 
-            raw_answer = result.get("output", "")
+            full_input = f"{context}\n\n{input_text}" if context else input_text
 
-            # 后处理：应用人格设定
+            result = agent_executor.invoke({"messages": [("user", full_input)]})
+
+            raw_answer = ""
+            if isinstance(result, dict) and "messages" in result:
+                for msg in result["messages"]:
+                    if hasattr(msg, 'content') and hasattr(msg, 'type') and msg.type == "ai":
+                        raw_answer = msg.content
+                        break
+
             if raw_answer and "Agent stopped due to" not in raw_answer:
                 try:
                     persona_prompt = f"""{system_prompt}
