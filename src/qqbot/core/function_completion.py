@@ -221,13 +221,14 @@ def create_chat_llm(llm_config):
     }
     if llm_config.get("USE_RESPONSES_API"):
         kwargs["use_responses_api"] = True
+        kwargs["streaming"] = True
+        kwargs["default_headers"] = {"User-Agent": "Mozilla/5.0"}
     return ChatOpenAI(**kwargs)
 
 def _make_llm():
     if not (_LLM_NAME and _LLM_URL and _LLM_KEY):
         raise RuntimeError("LLM 未配置：请在 config.LLM 中设置当前模型的 NAME/URL/KEY")
 
-    # 支持多模型 fallback - 取第一个模型用于决策
     model_name = _LLM_NAME.split(",")[0].strip() if "," in str(_LLM_NAME) else _LLM_NAME
 
     kwargs = {
@@ -239,9 +240,10 @@ def _make_llm():
         "max_retries": 2,
         "http_client": HTTP_CLIENT,
     }
-
     if _CURRENT_LLM.get("USE_RESPONSES_API"):
         kwargs["use_responses_api"] = True
+        kwargs["streaming"] = True
+        kwargs["default_headers"] = {"User-Agent": "Mozilla/5.0"}
 
     return ChatOpenAI(**kwargs)
 
