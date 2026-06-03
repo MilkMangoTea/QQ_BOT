@@ -209,7 +209,7 @@ _PROMPT = ChatPromptTemplate.from_messages([
 ]).partial(rules=_RULES_TEXT)
 
 # 供外部调用
-def create_chat_llm(llm_config):
+def create_chat_llm(llm_config, system_instructions=None):
     kwargs = {
         "model": llm_config["NAME"],
         "api_key": llm_config["KEY"],
@@ -223,6 +223,8 @@ def create_chat_llm(llm_config):
         kwargs["use_responses_api"] = True
         kwargs["streaming"] = True
         kwargs["default_headers"] = {"User-Agent": "Mozilla/5.0"}
+        if system_instructions:
+            kwargs["model_kwargs"] = {"instructions": system_instructions}
     return ChatOpenAI(**kwargs)
 
 def _make_llm():
@@ -331,8 +333,6 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
     from langgraph.prebuilt import create_react_agent
     from langchain_core.messages import SystemMessage
 
-    llm = create_chat_llm(llm_config)
-
     system_message = """你是一个智能助手，需要根据用户输入决定是否使用工具，并给出客观回复。
 
 关键规则：
@@ -341,7 +341,12 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
 3. 日常对话、闲聊、问候等直接回复
 4. 回复必须简洁客观，不要带角色人格"""
 
-    agent_executor = create_react_agent(llm, tools, state_modifier=system_message)
+    if llm_config.get("USE_RESPONSES_API"):
+        llm = create_chat_llm(llm_config, system_instructions=system_message)
+    else:
+        llm = create_chat_llm(llm_config)
+
+    agent_executor = create_react_agent(llm, tools, prompt=system_message)
 
     class ChainWrapper:
         def invoke(self, inputs, run_config=None):

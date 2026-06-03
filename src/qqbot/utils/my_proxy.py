@@ -98,14 +98,22 @@ async def ai_completion(session_id, user_content):
                     out("🧹 图片描述缓存已清理", f"删除 {len(keys_to_remove)} 条旧记录")
 
                 try:
-                    # 构建单张图片的识别请求
-                    desc_response = await asyncio.to_thread(
-                        llm.invoke,
-                        [
-                            SystemMessage(content=config.IMAGE_DESCRIPTION_PROMPT),
-                            HumanMessage(content=[{"type": "image_url", "image_url": {"url": image_url}}])
-                        ]
-                    )
+                    if CURRENT_LLM.get("USE_RESPONSES_API"):
+                        desc_response = await asyncio.to_thread(
+                            llm.invoke,
+                            [HumanMessage(content=[
+                                {"type": "text", "text": config.IMAGE_DESCRIPTION_PROMPT},
+                                {"type": "image_url", "image_url": {"url": image_url}}
+                            ])]
+                        )
+                    else:
+                        desc_response = await asyncio.to_thread(
+                            llm.invoke,
+                            [
+                                SystemMessage(content=config.IMAGE_DESCRIPTION_PROMPT),
+                                HumanMessage(content=[{"type": "image_url", "image_url": {"url": image_url}}])
+                            ]
+                        )
                     description = desc_response.content if hasattr(desc_response, 'content') else str(desc_response)
 
                     # 缓存结果
