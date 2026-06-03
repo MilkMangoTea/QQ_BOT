@@ -47,12 +47,32 @@ def _clear_chain_cache():
     _CHAIN_CACHE = {}
 
 # 大模型请求器(注意message不能为空!)
-async def ai_completion(session_id, user_content):
+async def ai_completion(session_id):
     try:
+        from langchain_core.messages import HumanMessage
+
         user_id = session_id.split(":", 1)[-1] if ":" in session_id else session_id
 
+        # 从历史记忆中获取最后一条用户消息
+        history = memory_manager.get_history(session_id)
+        if not history.messages:
+            return "嗯"
+
+        # 找到最后一条用户消息
+        last_user_msg = None
+        for msg in reversed(history.messages):
+            if isinstance(msg, HumanMessage):
+                last_user_msg = msg
+                break
+
+        if not last_user_msg:
+            return "嗯"
+
+        # 提取当前消息内容
+        user_content = last_user_msg.content if isinstance(last_user_msg.content, list) else [{"type": "text", "text": str(last_user_msg.content)}]
+
         # 获取长期记忆
-        user_text = "".join([p.get("text", "") for p in user_content if p.get("type") == "text"])
+        user_text = "".join([p.get("text", "") for p in user_content if isinstance(p, dict) and p.get("type") == "text"])
         long_mem = get_long_memory_text(memory_pool, user_id, user_text)
 
         out("🏁 [ai_completion] 调用 chain, session:", session_id)
@@ -345,22 +365,8 @@ async def handle_message(websocket, event):
         msg_type = event.get("message_type")
         out("⏳ 当前会话:", session_id)
 
-        # 从 event 提取用户输入（包括文本和图片）
-        message = event.get("message")
-        nickname = event.get("sender").get("nickname")
-        msgs = await process_single_message(message, nickname, CURRENT_LLM)
-
-        # 合并所有用户消息内容（包括图片）
-        user_content = []
-        for msg in msgs:
-            if msg.get("role") == "user":
-                user_content.extend(msg.get("content", []))
-
-        if not user_content:
-            user_content = [{"type": "text", "text": "[无文本内容]"}]
-
-        # 调用 chain 生成回复
-        content = await ai_completion(session_id, user_content)
+        # 调用 chain 生成回复（不再传递 user_content，完全依赖记忆）
+        content = await ai_completion(session_id)
 
         if not content:
             return
