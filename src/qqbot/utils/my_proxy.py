@@ -73,7 +73,9 @@ async def ai_completion(session_id):
 
         # 获取长期记忆
         user_text = "".join([p.get("text", "") for p in user_content if isinstance(p, dict) and p.get("type") == "text"])
+        out("📚 开始查询长期记忆")
         long_mem = get_long_memory_text(memory_pool, user_id, user_text)
+        out("✅ 长期记忆查询完成")
 
         out("🏁 [ai_completion] 调用 chain, session:", session_id)
         out("📝 [ai_completion] 用户输入:", str(user_content)[:100])
