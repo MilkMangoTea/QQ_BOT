@@ -250,77 +250,98 @@ async def ai_completion(session_id):
         names = [s.strip() for s in str(LLM_NAME).split(",") if s.strip()]
 
         last_err = None
+        max_retries = 2  # 每个模型最多重试 2 次
+
         try:
             for model_name in names:
-                try:
-                    # 为当前模型创建临时配置
-                    temp_config = CURRENT_LLM.copy()
-                    temp_config["NAME"] = model_name
+                retry_count = 0
 
-                    # 统一使用 Agent chain（现在图片已转为描述）
-                    if model_name not in _CHAIN_CACHE:
-                        _CHAIN_CACHE[model_name] = create_agent_chain_with_memory(
-                            memory_manager=memory_manager,
-                            long_memory_pool=memory_pool,
-                            system_prompt=system_prompt,
-                            llm_config=temp_config,
-                            tools=TOOLS
-                        )
-                    chain = _CHAIN_CACHE[model_name]
-
-                    from langchain_core.messages import HumanMessage
-                    input_msg = HumanMessage(content=user_content)
-
-                    # 添加超时保护（60秒超时）
+                while retry_count <= max_retries:
                     try:
-                        response = await asyncio.wait_for(
-                            asyncio.to_thread(
-                                chain.invoke,
-                                {"input": [input_msg], "long_memory": long_mem},
-                                run_config={"configurable": {"session_id": agent_session_id}}
-                            ),
-                            timeout=60.0
-                        )
-                    except asyncio.TimeoutError:
-                        print(f"⏱️ 模型 {model_name} 超时，尝试下一个模型")
-                        continue
+                        # 为当前模型创建临时配置
+                        temp_config = CURRENT_LLM.copy()
+                        temp_config["NAME"] = model_name
 
-                    if isinstance(response, dict):
-                        content = response.get("output", "")
-                    else:
-                        content = response.content if hasattr(response, 'content') else str(response)
-
-                    # 确保 content 是纯文本，不含 Responses API 的 item id
-                    content = lc_message_to_text(content) if not isinstance(content, str) else content
-                    content = content.strip() if content else ""
-
-                    # 过滤掉 Agent 错误信息
-                    if not content or "Agent stopped due to" in content:
-                        content = "嗯"
-
-                    out("短期记忆：", memory_manager.get_or_create_session(session_id).history)
-                    out("原始信息：", content)
-                    out("✅ 使用模型：", model_name)
-
-                    # 异步更新长期记忆
-                    def _safe_add_long_memory():
-                        try:
-                            memory_pool.add_turn(
-                                user_id=user_id,
-                                user_text=user_text,
-                                assistant_text=content
+                        # 统一使用 Agent chain（现在图片已转为描述）
+                        if model_name not in _CHAIN_CACHE:
+                            _CHAIN_CACHE[model_name] = create_agent_chain_with_memory(
+                                memory_manager=memory_manager,
+                                long_memory_pool=memory_pool,
+                                system_prompt=system_prompt,
+                                llm_config=temp_config,
+                                tools=TOOLS
                             )
-                        except Exception as e:
-                            print("⚠️ [ai_completion] mem0 add_turn 失败：", e)
+                        chain = _CHAIN_CACHE[model_name]
 
-                    asyncio.create_task(asyncio.to_thread(_safe_add_long_memory))
+                        from langchain_core.messages import HumanMessage
+                        input_msg = HumanMessage(content=user_content)
 
-                    return content
+                        # 添加超时保护（60秒超时）
+                        if retry_count > 0:
+                            print(f"🔄 模型 {model_name} 第 {retry_count + 1} 次尝试...")
 
-                except Exception as e:
-                    last_err = e
-                    print(f"⚠️ 模型 {model_name} 失败: {e}")
-                    continue
+                        try:
+                            response = await asyncio.wait_for(
+                                asyncio.to_thread(
+                                    chain.invoke,
+                                    {"input": [input_msg], "long_memory": long_mem},
+                                    run_config={"configurable": {"session_id": agent_session_id}}
+                                ),
+                                timeout=60.0
+                            )
+                        except asyncio.TimeoutError as timeout_err:
+                            last_err = timeout_err
+                            retry_count += 1
+                            if retry_count <= max_retries:
+                                print(f"⏱️ 模型 {model_name} 超时 (尝试 {retry_count}/{max_retries + 1})，重试中...")
+                                await asyncio.sleep(1)  # 短暂延迟后重试
+                                continue
+                            else:
+                                print(f"⏱️ 模型 {model_name} 超时，已达最大重试次数，尝试下一个模型")
+                                break
+
+                        if isinstance(response, dict):
+                            content = response.get("output", "")
+                        else:
+                            content = response.content if hasattr(response, 'content') else str(response)
+
+                        # 确保 content 是纯文本，不含 Responses API 的 item id
+                        content = lc_message_to_text(content) if not isinstance(content, str) else content
+                        content = content.strip() if content else ""
+
+                        # 过滤掉 Agent 错误信息
+                        if not content or "Agent stopped due to" in content:
+                            content = "嗯"
+
+                        out("短期记忆：", memory_manager.get_or_create_session(session_id).history)
+                        out("原始信息：", content)
+                        out("✅ 使用模型：", model_name)
+
+                        # 异步更新长期记忆
+                        def _safe_add_long_memory():
+                            try:
+                                memory_pool.add_turn(
+                                    user_id=user_id,
+                                    user_text=user_text,
+                                    assistant_text=content
+                                )
+                            except Exception as e:
+                                print("⚠️ [ai_completion] mem0 add_turn 失败：", e)
+
+                        asyncio.create_task(asyncio.to_thread(_safe_add_long_memory))
+
+                        return content
+
+                    except Exception as e:
+                        last_err = e
+                        retry_count += 1
+                        if retry_count <= max_retries:
+                            print(f"⚠️ 模型 {model_name} 失败 (尝试 {retry_count}/{max_retries + 1}): {e}，重试中...")
+                            await asyncio.sleep(1)
+                            continue
+                        else:
+                            print(f"⚠️ 模型 {model_name} 失败: {e}，已达最大重试次数")
+                            break
         finally:
             # 确保清理临时 session（无论成功还是失败）
             if has_image and agent_session_id != session_id:
@@ -331,13 +352,15 @@ async def ai_completion(session_id):
                 except Exception as e:
                     print(f"⚠️ 清理临时 session 失败: {e}")
 
-        # 所有模型都失败
+        # 所有模型都失败，返回默认回复
         print(f"⚠️ [ai_completion] 全部候选模型失败: {last_err}")
-        return None
+        print("💬 返回默认回复")
+        return "嗯"
 
     except Exception as e:
         print(f"⚠️ [ai_completion] 调用 LLM 发生错误: {e}")
-        return None
+        print("💬 返回默认回复")
+        return "嗯"
 
 
 # QQ 消息发送器
@@ -483,15 +506,26 @@ async def qq_bot():
                         await send_message(ws, my_event)
                     continue
 
-                await remember(ws, event)
-
-                if rep(event, memory_manager):
-                    await handle_message(ws, event)
+                # 并发处理消息，避免阻塞其他消息
+                asyncio.create_task(_process_message_task(ws, event))
 
             except json.JSONDecodeError:
                 print("⚠️ 收到非JSON格式消息")
             except Exception as e:
                 print(f"⚠️ 处理消息时发生错误: {e}")
+
+
+async def _process_message_task(ws, event):
+    """异步处理单个消息的任务"""
+    try:
+        await remember(ws, event)
+        if rep(event, memory_manager):
+            await handle_message(ws, event)
+    except Exception as e:
+        print(f"⚠️ [_process_message_task] 处理消息异常: {e}")
+        import traceback
+        traceback.print_exc()
+
 
 
 if __name__ == "__main__":
