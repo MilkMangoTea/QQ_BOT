@@ -24,6 +24,9 @@ from src.qqbot.core.function_long_turn_memory import LocalDictStore
 from src.qqbot.core.function_session_memory import calc_session_id
 from src.qqbot.core.function_tools import TOOLS
 
+# WebSocket 读取锁，防止并发读取冲突
+_websocket_read_lock = asyncio.Lock()
+
 CURRENT_LLM = config.LLM[config.CURRENT_COMPLETION]
 LLM_NAME = CURRENT_LLM["NAME"]
 system_prompt = config.PROMPT[0] + config.PROMPT[config.CURRENT_PROMPT]
@@ -400,12 +403,15 @@ async def remember(websocket, event):
     try:
         session_id = calc_session_id(event)
 
-        # 如果会话未初始化，先拉取历史
+        # 如果会话未初始化，先拉取历史（使用锁保护 WebSocket 读取）
         if not memory_manager.is_session_initialized(session_id):
             print(f"🔍 首次记忆，正在拉取历史消息...")
-            history_msgs = await get_nearby_message(websocket, event, CURRENT_LLM)
-            if history_msgs:
-                await memory_manager.initialize_with_history(session_id, history_msgs)
+            async with _websocket_read_lock:
+                # 双重检查，避免其他协程已经初始化
+                if not memory_manager.is_session_initialized(session_id):
+                    history_msgs = await get_nearby_message(websocket, event, CURRENT_LLM)
+                    if history_msgs:
+                        await memory_manager.initialize_with_history(session_id, history_msgs)
 
         message = event.get("message")
         nickname = event.get("sender").get("nickname")
@@ -506,8 +512,8 @@ async def qq_bot():
                         await send_message(ws, my_event)
                     continue
 
-                # 并发处理消息，避免阻塞其他消息
-                asyncio.create_task(_process_message_task(ws, event))
+                # 所有消息处理都并发执行（锁已在 remember 内部保护 WebSocket 读取）
+                asyncio.create_task(_process_message_concurrent(ws, event))
 
             except json.JSONDecodeError:
                 print("⚠️ 收到非JSON格式消息")
@@ -515,14 +521,14 @@ async def qq_bot():
                 print(f"⚠️ 处理消息时发生错误: {e}")
 
 
-async def _process_message_task(ws, event):
-    """异步处理单个消息的任务"""
+async def _process_message_concurrent(ws, event):
+    """并发处理单个消息（完整流程，锁已在内部保护 WebSocket 读取）"""
     try:
         await remember(ws, event)
         if rep(event, memory_manager):
             await handle_message(ws, event)
     except Exception as e:
-        print(f"⚠️ [_process_message_task] 处理消息异常: {e}")
+        print(f"⚠️ [_process_message_concurrent] 处理消息异常: {e}")
         import traceback
         traceback.print_exc()
 
