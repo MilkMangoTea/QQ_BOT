@@ -115,7 +115,8 @@ class MemoryManager:
                                 text_parts.append("[图片]")
                         elif seg_type == "at":
                             qq = seg_data.get("qq", "")
-                            if qq == SELF_USER_ID:
+                            # 修复问题7：统一类型比较，避免 str vs int 不匹配
+                            if str(qq) == str(SELF_USER_ID):
                                 text_parts.append("(系统提示:对方想和你说话)")
                             else:
                                 text_parts.append("(系统提示:对方在和其他人说话)")
@@ -146,6 +147,15 @@ class MemoryManager:
         print(f"✅ 会话 {session_id} 已初始化，加载 {len(session.history.messages)} 条历史")
 
     def get_history(self, session_id: str) -> BaseChatMessageHistory:
+        """
+        获取会话历史记录
+
+        注意（修复问题8）：
+        - 当消息数 <= context_window 时，返回原始 session.history（可修改）
+        - 当消息数 > context_window 时，返回裁剪后的新对象（只读，修改不会影响原 session）
+        - 调用者应只读取返回的历史，不要直接修改
+        - 使用 add_user_message/add_ai_message 方法来添加新消息
+        """
         session = self.get_or_create_session(session_id)
 
         all_messages = session.history.messages
@@ -154,7 +164,7 @@ class MemoryManager:
         if len(all_messages) <= self._context_window:
             return session.history
 
-        # 裁剪：只保留最近的消息
+        # 裁剪：只保留最近的消息（返回新对象，只读）
         limited_history = ChatMessageHistory()
         for msg in all_messages[-self._context_window:]:
             limited_history.add_message(msg)

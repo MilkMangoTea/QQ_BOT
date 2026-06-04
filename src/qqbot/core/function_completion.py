@@ -472,17 +472,17 @@ def should_reply_langchain(event: Dict[str, Any], memory_manager, session_id: st
         proactive_categories = {"TOPIC", "CHITCHAT", "OTHER"}
         is_proactive = (target == "GROUP" and category in proactive_categories)
 
+        # 置信度过滤（修复问题6：在标记冷却之前进行置信度过滤）
+        if confidence < 0.55 and category not in {"QUESTION", "FOLLOWUP"}:
+            return False
+
         # 如果是主动参与，检查冷却
         if is_proactive and not directed_to_bot:
             if memory_manager.recent_bot_proactive_reply(session_id, within_seconds=300):
                 print("🔇 主动参与冷却中，跳过回复")
                 return False
-            # 通过冷却检查，标记本次为主动回复
+            # 所有过滤通过后，标记本次为主动回复（修复问题6）
             memory_manager.mark_proactive_reply(session_id)
-
-        # 置信度过滤
-        if confidence < 0.55 and category not in {"QUESTION", "FOLLOWUP"}:
-            return False
 
         return True
 
@@ -547,19 +547,27 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
             else:
                 history_msgs = []
 
-            history_lines = []
-            for msg in history_msgs:
-                role = '用户' if isinstance(msg, HumanMessage) else 'AI'
-                text = lc_message_to_text(msg)
-                if text:
-                    history_lines.append(f"{role}: {text}")
-            history_text = "\n".join(history_lines)
-
+            # 提取当前输入内容（用于去重比对）
             input_msgs = inputs.get("input", [])
             input_text = ""
             for msg in input_msgs:
                 if hasattr(msg, 'content'):
                     input_text = lc_message_to_text(msg)
+
+            # 修复新bug4/5：按文本内容比对去重（统一图文场景）
+            # 跳过与当前输入文本完全相同的历史消息
+            history_lines = []
+            for msg in history_msgs:
+                # 如果是 HumanMessage 且文本与当前输入完全相同，跳过
+                if isinstance(msg, HumanMessage) and input_text:
+                    if lc_message_to_text(msg) == input_text:
+                        continue
+
+                role = '用户' if isinstance(msg, HumanMessage) else 'AI'
+                text = lc_message_to_text(msg)
+                if text:
+                    history_lines.append(f"{role}: {text}")
+            history_text = "\n".join(history_lines)
 
             long_memory = inputs.get("long_memory", "")
             context = f"【相关长期记忆】\n{long_memory}\n\n【历史对话】\n{history_text}" if long_memory or history_text else ""

@@ -2,6 +2,7 @@ import asyncio
 import websockets
 import json
 import time
+import uuid
 from src.qqbot.config import config
 from src.qqbot.config.config import FORTUNE_GROUPS
 from src.qqbot.core.function import (
@@ -24,9 +25,6 @@ from src.qqbot.core.function_long_turn_memory import LocalDictStore
 from src.qqbot.core.function_session_memory import calc_session_id
 from src.qqbot.core.function_tools import TOOLS
 
-# WebSocket 读取锁，防止并发读取冲突
-_websocket_read_lock = asyncio.Lock()
-
 CURRENT_LLM = config.LLM[config.CURRENT_COMPLETION]
 LLM_NAME = CURRENT_LLM["NAME"]
 system_prompt = config.PROMPT[0] + config.PROMPT[config.CURRENT_PROMPT]
@@ -36,6 +34,9 @@ memory_manager = MemoryManager(
     timeout=config.HISTORY_TIMEOUT,
     context_window=30  # 与 MESSAGE_COUNT 保持一致
 )
+
+# Action 请求/响应管理（echo 机制）
+_pending_actions = {}  # {echo_id: asyncio.Future}
 
 # 图片描述缓存：{image_url: description}，限制大小防止内存泄漏
 _IMAGE_DESCRIPTION_CACHE = {}
@@ -49,30 +50,50 @@ def _clear_chain_cache():
     global _CHAIN_CACHE
     _CHAIN_CACHE = {}
 
+
+async def send_action_and_wait(websocket, action, params, timeout=10.0):
+    """发送 action 并等待响应（通过 echo 关联，避免并发 recv 冲突）"""
+    # 修复新bug1：使用 UUID 避免计数器竞态
+    echo_id = f"action_{uuid.uuid4().hex}"
+
+    future = asyncio.Future()
+    _pending_actions[echo_id] = future
+
+    try:
+        payload = {
+            "action": action,
+            "params": params,
+            "echo": echo_id
+        }
+        await websocket.send(json.dumps(payload))
+
+        # 等待响应，带超时
+        result = await asyncio.wait_for(future, timeout=timeout)
+        return result
+    except asyncio.TimeoutError:
+        print(f"⏱️ Action {action} 超时")
+        return None
+    finally:
+        _pending_actions.pop(echo_id, None)
+
+
 # 大模型请求器(注意message不能为空!)
-async def ai_completion(session_id):
+async def ai_completion(session_id, user_content):
+    """
+    AI 补全函数
+
+    Args:
+        session_id: 会话 ID
+        user_content: 当前消息内容（显式传递，修复问题4：避免并发下捞错消息）
+    """
     try:
         from langchain_core.messages import HumanMessage
+        import uuid
 
         user_id = session_id.split(":", 1)[-1] if ":" in session_id else session_id
 
-        # 从历史记忆中获取最后一条用户消息
-        history = memory_manager.get_history(session_id)
-        if not history.messages:
+        if not user_content:
             return "嗯"
-
-        # 找到最后一条用户消息
-        last_user_msg = None
-        for msg in reversed(history.messages):
-            if isinstance(msg, HumanMessage):
-                last_user_msg = msg
-                break
-
-        if not last_user_msg:
-            return "嗯"
-
-        # 提取当前消息内容
-        user_content = last_user_msg.content if isinstance(last_user_msg.content, list) else [{"type": "text", "text": str(last_user_msg.content)}]
 
         # 获取长期记忆（放到线程池执行，避免阻塞）
         user_text = "".join([p.get("text", "") for p in user_content if isinstance(p, dict) and p.get("type") == "text"])
@@ -237,7 +258,9 @@ async def ai_completion(session_id):
 
             # 临时创建一个包含描述的 session，用于 Agent 推理
             # 原始 memory 保持不变
-            temp_session_id = session_id + "_temp_described"
+            # 修复问题3：使用 uuid 避免并发冲突
+            import uuid
+            temp_session_id = f"{session_id}_temp_{uuid.uuid4().hex[:8]}"
             temp_session = memory_manager.get_or_create_session(temp_session_id)
             temp_session.history.clear()
             for msg in described_history:
@@ -403,21 +426,36 @@ async def remember(websocket, event):
     try:
         session_id = calc_session_id(event)
 
-        # 如果会话未初始化，先拉取历史（使用锁保护 WebSocket 读取）
+        # 如果会话未初始化，先拉取历史（使用 echo 机制，不直接 recv）
         if not memory_manager.is_session_initialized(session_id):
             print(f"🔍 首次记忆，正在拉取历史消息...")
-            async with _websocket_read_lock:
-                # 双重检查，避免其他协程已经初始化
-                if not memory_manager.is_session_initialized(session_id):
-                    history_msgs = await get_nearby_message(websocket, event, CURRENT_LLM)
-                    if history_msgs:
-                        await memory_manager.initialize_with_history(session_id, history_msgs)
+
+            msg_type = event.get("message_type")
+            key = "group_id" if msg_type == "group" else "user_id"
+            act = "get_group_msg_history" if msg_type == "group" else "get_friend_msg_history"
+            current_id = event[key]
+
+            result = await send_action_and_wait(
+                websocket,
+                act,
+                {key: current_id, "message_seq": 0},
+                timeout=5.0
+            )
+
+            if result and result.get("status") == "ok":
+                messages = result.get("data", {}).get("messages", [])
+                history_msgs = messages[-config.MESSAGE_COUNT:] if messages else []
+                if history_msgs:
+                    await memory_manager.initialize_with_history(session_id, history_msgs)
 
         message = event.get("message")
         nickname = event.get("sender").get("nickname")
 
         # 处理消息，保留完整的多模态内容
         msgs = await process_single_message(message, nickname, CURRENT_LLM)
+
+        # 修复新bug3：收集所有用户消息分段，避免丢失内容
+        all_user_content = []
 
         for msg in msgs:
             role = msg.get("role")
@@ -426,6 +464,12 @@ async def remember(websocket, event):
             if role == "user" and content:
                 # 直接传递多模态内容
                 memory_manager.add_user_message(session_id, content)
+
+                # 合并到总内容
+                if isinstance(content, list):
+                    all_user_content.extend(content)
+                else:
+                    all_user_content.append(content)
 
                 # 提取文本用于日志
                 text_parts = []
@@ -440,19 +484,31 @@ async def remember(websocket, event):
                 if text:
                     out("💾 新用户消息:", text[:80])
 
+        # 返回合并后的完整消息内容
+        return all_user_content if all_user_content else None
+
     except Exception as e:
         print(f"⚠️ [remember] 异常: {e}")
+        return None
 
 # 处理消息事件并发送回复
-async def handle_message(websocket, event):
+async def handle_message(websocket, event, user_content):
+    """
+    处理消息并生成回复
+
+    Args:
+        websocket: WebSocket 连接
+        event: 事件对象
+        user_content: 当前消息内容（显式传递，修复问题4）
+    """
     try:
         session_id = calc_session_id(event)
 
         msg_type = event.get("message_type")
         out("⏳ 当前会话:", session_id)
 
-        # 调用 chain 生成回复（不再传递 user_content，完全依赖记忆）
-        content = await ai_completion(session_id)
+        # 调用 chain 生成回复（显式传递 user_content）
+        content = await ai_completion(session_id, user_content)
 
         if not content:
             return
@@ -493,40 +549,69 @@ async def qq_bot():
             theme="random"
         )
 
-        async for message in ws:
-            try:
-                event = json.loads(message)
-                # 响应"戳一戳"
-                if event.get("post_type") == "notice" and event.get("sub_type") == "poke" and event.get(
-                        "target_id") == config.SELF_USER_ID:
-                    await send_message(ws, build_params_text_only(event, ran_rep_text_only()))
-                    continue
+        try:
+            async for message in ws:
+                try:
+                    event = json.loads(message)
 
-                # 过滤非消息事件
-                if event.get("post_type") != "message":
-                    continue
+                    # 处理 action 响应（通过 echo 关联，修复问题1）
+                    if "echo" in event:
+                        echo_id = event["echo"]
+                        if echo_id in _pending_actions:
+                            future = _pending_actions[echo_id]
+                            if not future.done():
+                                future.set_result(event)
+                        continue
 
-                my_event = await special_event(event)
-                if my_event:
-                    if my_event.get("message"):
-                        await send_message(ws, my_event)
-                    continue
+                    # 响应"戳一戳"
+                    if event.get("post_type") == "notice" and event.get("sub_type") == "poke" and event.get(
+                            "target_id") == config.SELF_USER_ID:
+                        await send_message(ws, build_params_text_only(event, ran_rep_text_only()))
+                        continue
 
-                # 所有消息处理都并发执行（锁已在 remember 内部保护 WebSocket 读取）
-                asyncio.create_task(_process_message_concurrent(ws, event))
+                    # 过滤非消息事件
+                    if event.get("post_type") != "message":
+                        continue
 
-            except json.JSONDecodeError:
-                print("⚠️ 收到非JSON格式消息")
-            except Exception as e:
-                print(f"⚠️ 处理消息时发生错误: {e}")
+                    my_event = await special_event(event)
+                    if my_event:
+                        if my_event.get("message"):
+                            await send_message(ws, my_event)
+                        continue
+
+                    # 所有消息处理都并发执行（锁已在 remember 内部保护 WebSocket 读取）
+                    asyncio.create_task(_process_message_concurrent(ws, event))
+
+                except json.JSONDecodeError:
+                    print("⚠️ 收到非JSON格式消息")
+                except Exception as e:
+                    print(f"⚠️ 处理消息时发生错误: {e}")
+
+        finally:
+            # 修复新bug2：断线重连时取消所有悬空的 Future
+            print("🔌 连接断开，清理悬空的 action 请求...")
+            for fut in list(_pending_actions.values()):
+                if not fut.done():
+                    fut.cancel()
+            _pending_actions.clear()
 
 
 async def _process_message_concurrent(ws, event):
     """并发处理单个消息（完整流程，锁已在内部保护 WebSocket 读取）"""
     try:
-        await remember(ws, event)
-        if rep(event, memory_manager):
-            await handle_message(ws, event)
+        # 记忆处理，返回当前消息内容
+        user_content = await remember(ws, event)
+
+        if not user_content:
+            return
+
+        # 异步化 rep() 调用，避免阻塞事件循环（修复问题2）
+        should_reply = await asyncio.to_thread(rep, event, memory_manager)
+
+        if should_reply:
+            # 显式传递 user_content（修复问题4）
+            await handle_message(ws, event, user_content)
+
     except Exception as e:
         print(f"⚠️ [_process_message_concurrent] 处理消息异常: {e}")
         import traceback
