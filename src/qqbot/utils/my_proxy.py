@@ -118,21 +118,28 @@ async def ai_completion(session_id):
                     out("🧹 图片描述缓存已清理", f"删除 {len(keys_to_remove)} 条旧记录")
 
                 try:
+                    # 添加超时保护（30秒）
                     if CURRENT_LLM.get("USE_RESPONSES_API"):
-                        desc_response = await asyncio.to_thread(
-                            llm.invoke,
-                            [HumanMessage(content=[
-                                {"type": "text", "text": config.IMAGE_DESCRIPTION_PROMPT},
-                                {"type": "image_url", "image_url": {"url": image_url}}
-                            ])]
+                        desc_response = await asyncio.wait_for(
+                            asyncio.to_thread(
+                                llm.invoke,
+                                [HumanMessage(content=[
+                                    {"type": "text", "text": config.IMAGE_DESCRIPTION_PROMPT},
+                                    {"type": "image_url", "image_url": {"url": image_url}}
+                                ])]
+                            ),
+                            timeout=30.0
                         )
                     else:
-                        desc_response = await asyncio.to_thread(
-                            llm.invoke,
-                            [
-                                SystemMessage(content=config.IMAGE_DESCRIPTION_PROMPT),
-                                HumanMessage(content=[{"type": "image_url", "image_url": {"url": image_url}}])
-                            ]
+                        desc_response = await asyncio.wait_for(
+                            asyncio.to_thread(
+                                llm.invoke,
+                                [
+                                    SystemMessage(content=config.IMAGE_DESCRIPTION_PROMPT),
+                                    HumanMessage(content=[{"type": "image_url", "image_url": {"url": image_url}}])
+                                ]
+                            ),
+                            timeout=30.0
                         )
                     description = lc_message_to_text(desc_response).strip()
 
@@ -141,12 +148,19 @@ async def ai_completion(session_id):
                     out("🖼️ 新图片描述生成", description[:100])
 
                     return description
+
+                except asyncio.TimeoutError:
+                    return "[图片识别超时]"
                 except Exception as e:
                     out("⚠️ 图片描述失败", str(e))
                     return "[图片识别失败]"
 
             # 收集所有包含图片的消息并生成描述（创建新列表，不修改原 memory）
+            # 限制：只处理最近的5张图片，其余显示为 [过期图片]
             described_history = []
+            image_count = 0
+            MAX_IMAGES = 5
+
             for msg in history.messages:
                 if isinstance(msg, HumanMessage) and isinstance(msg.content, list):
                     # 提取文本和图片
@@ -160,8 +174,12 @@ async def ai_completion(session_id):
                             elif part.get("type") == "image_url":
                                 img_url = part.get("image_url", {}).get("url", "")
                                 if img_url:
-                                    desc = await get_image_description(img_url)
-                                    image_descs.append(desc)
+                                    if image_count < MAX_IMAGES:
+                                        desc = await get_image_description(img_url)
+                                        image_descs.append(desc)
+                                        image_count += 1
+                                    else:
+                                        image_descs.append("[过期图片]")
 
                     # 合并文本和图片描述
                     combined_text = "".join(text_parts)
@@ -177,7 +195,7 @@ async def ai_completion(session_id):
                     # 纯文本用户消息
                     described_history.append(msg)
 
-            # 处理当前输入中的图片
+            # 处理当前输入中的图片（继续使用相同的计数器）
             text_parts = []
             image_descs = []
 
@@ -188,8 +206,12 @@ async def ai_completion(session_id):
                     elif part.get("type") in ["image_url", "image"]:
                         img_url = part.get("image_url", {}).get("url", "") if part.get("type") == "image_url" else part.get("url", "")
                         if img_url:
-                            desc = await get_image_description(img_url)
-                            image_descs.append(desc)
+                            if image_count < MAX_IMAGES:
+                                desc = await get_image_description(img_url)
+                                image_descs.append(desc)
+                                image_count += 1
+                            else:
+                                image_descs.append("[过期图片]")
 
             # 更新 user_content 为纯文本
             combined_text = "".join(text_parts)
@@ -236,11 +258,20 @@ async def ai_completion(session_id):
 
                     from langchain_core.messages import HumanMessage
                     input_msg = HumanMessage(content=user_content)
-                    response = await asyncio.to_thread(
-                        chain.invoke,
-                        {"input": [input_msg], "long_memory": long_mem},
-                        run_config={"configurable": {"session_id": agent_session_id}}
-                    )
+
+                    # 添加超时保护（60秒超时）
+                    try:
+                        response = await asyncio.wait_for(
+                            asyncio.to_thread(
+                                chain.invoke,
+                                {"input": [input_msg], "long_memory": long_mem},
+                                run_config={"configurable": {"session_id": agent_session_id}}
+                            ),
+                            timeout=60.0
+                        )
+                    except asyncio.TimeoutError:
+                        print(f"⏱️ 模型 {model_name} 超时，尝试下一个模型")
+                        continue
 
                     if isinstance(response, dict):
                         content = response.get("output", "")
@@ -298,22 +329,36 @@ async def ai_completion(session_id):
 
 
 # QQ 消息发送器
-async def send_message(websocket, params):
-    try:
-        if params is None:
-            raise ValueError("params is None")
+async def send_message(websocket, params, retry_count=3):
+    """发送消息，支持重试机制"""
+    if params is None:
+        raise ValueError("params is None")
 
-        await websocket.send(json.dumps({
-            "action": "send_msg",
-            "params": params
-        }))
+    for attempt in range(retry_count):
+        try:
+            await websocket.send(json.dumps({
+                "action": "send_msg",
+                "params": params
+            }))
+            # 发送成功
+            if attempt > 0:
+                print(f"✅ [send_message] 重试成功 (第 {attempt + 1} 次尝试)")
+            return True
 
-    except websockets.exceptions.WebSocketException as e:
-        # 捕获 WebSocket 相关异常
-        print(f"⚠️ [send_message] WebSocket 错误: {e}")
-    except Exception as e:
-        # 捕获其他类型的异常
-        print(f"⚠️ [send_message] 发送消息时发生错误: {e}")
+        except (websockets.exceptions.ConnectionClosed, websockets.exceptions.WebSocketException) as e:
+            print(f"⚠️ [send_message] WebSocket 错误 (尝试 {attempt + 1}/{retry_count}): {e}")
+            if attempt < retry_count - 1:
+                # 等待一小段时间再重试
+                await asyncio.sleep(1)
+            else:
+                print(f"❌ [send_message] 发送失败，已达到最大重试次数")
+                return False
+
+        except Exception as e:
+            print(f"⚠️ [send_message] 未知错误: {e}")
+            return False
+
+    return False
 
 # 记忆函数
 async def remember(websocket, event):
@@ -391,7 +436,12 @@ async def handle_message(websocket, event):
 
 async def qq_bot():
     """主连接函数"""
-    async with websockets.connect(config.WEBSOCKET_URI) as ws:
+    # 增加 ping_timeout 和 ping_interval，防止 AI 推理期间连接超时
+    async with websockets.connect(
+        config.WEBSOCKET_URI,
+        ping_interval=20,  # 每 20 秒发送一次 ping
+        ping_timeout=60    # ping 超时时间 60 秒（足够 AI 推理完成）
+    ) as ws:
         print("✅ 成功连接到WebSocket服务器")
 
         fortune_scheduler = setup_daily_fortune_scheduler(

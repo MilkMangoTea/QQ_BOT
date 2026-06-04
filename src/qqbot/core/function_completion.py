@@ -583,7 +583,7 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
                     return {"output": final_answer or "嗯"}
                 except Exception as e:
                     print(f"⚠️ LLM 调用失败: {e}")
-                    return {"output": "抱歉，处理失败了"}
+                    return {"output": "嗯"}
 
             # 有 agent 的情况：调用工具链
             result = agent_executor.invoke({"messages": [("user", full_input)]})

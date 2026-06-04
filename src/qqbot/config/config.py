@@ -6,7 +6,7 @@ load_dotenv(dotenv_path="/opt/QQ_BOT/my_env/api_key.env")  # 指定绝对路径
 
 # 导入的最近消息数量(这个数量至少为1,否则不引入最新内容)
 # 与 MemoryManager 的 context_window 保持一致，确保完整的上下文
-MESSAGE_COUNT = 30
+MESSAGE_COUNT = 20
 
 # 需要监听的目标用户QQ号
 TARGET_USER_ID = int(os.environ.get("MY_QQ_ID"))
@@ -18,7 +18,7 @@ WEBSOCKET_URI = "ws://127.0.0.1:3001/?access_token=qwert"
 SELF_USER_ID = int(os.environ.get("BOT_QQ_ID"))
 
 # 随机回复概率
-RAN_REP_PROBABILITY = 2
+RAN_REP_PROBABILITY = 5
 
 # 回复表情包概率
 RAN_EMOJI_PROBABILITY = 0
@@ -64,7 +64,14 @@ POKE = [
     "喵~",
     "汪喵～",
     "戳你码喵~",
-    "114514喵~"
+    "114514喵~",
+    "你再戳喵就报警喵~",
+    "再戳把你扬了喵~",
+    "戳一下少活十年喵~",
+    "你最好有事喵~",
+    "戳你一下骨灰都给你扬了喵~",
+    "1145141919810喵~",
+    "喵了个咪的喵~"
 ]
 
 CURRENT_PROMPT = 2
