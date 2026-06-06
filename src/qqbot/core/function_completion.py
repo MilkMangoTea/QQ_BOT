@@ -347,6 +347,7 @@ def create_chat_llm(llm_config, system_instructions=None):
     if llm_config.get("USE_RESPONSES_API"):
         kwargs["use_responses_api"] = True
         kwargs["streaming"] = True
+        kwargs["store"] = False
         kwargs["default_headers"] = {"User-Agent": "Mozilla/5.0"}
         if system_instructions:
             kwargs["instructions"] = system_instructions
@@ -370,6 +371,7 @@ def _make_llm():
     if _CURRENT_LLM.get("USE_RESPONSES_API"):
         kwargs["use_responses_api"] = True
         kwargs["streaming"] = True
+        kwargs["store"] = False
         kwargs["default_headers"] = {"User-Agent": "Mozilla/5.0"}
 
     return ChatOpenAI(**kwargs)
