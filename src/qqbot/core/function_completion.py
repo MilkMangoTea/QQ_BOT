@@ -264,7 +264,7 @@ _FEWSHOT = _build_fewshot()
 _RULES_TEXT = """
 你是”群聊消息路由器”。目标：基于上下文与当前消息，按【猫娘】人设判断此刻是否应该发言。
 只返回 JSON，键固定且唯一：
-{“should_reply”: true/false, “category”: “...”, “target”: “...”, “interest”: 0~1, “confidence”: 0~1}
+{"should_reply": true, "category": "TOPIC", "target": "BOT", "interest": 0.8, "confidence": 0.9}
 不要输出解释、前后缀或多余文本。
 
 【人设基调】
@@ -417,7 +417,17 @@ def _parse_decision_message(msg) -> Decision:
         if not match:
             raise ValueError(f"LLM 未返回 JSON: {text}")
 
-        data = json.loads(match.group(0))
+        json_str = match.group(0)
+        # 归一化全角引号/标点，防止模型输出 " " ' ' ， 导致解析失败
+        json_str = (
+            json_str
+            .replace("“", '"').replace("”", '"')   # " " -> "
+            .replace("‘", "'").replace("’", "'")   # ' ' -> '
+            .replace("，", ",")                          # ，  -> ,
+            .replace("：", ":")                          # ：  -> :
+        )
+
+        data = json.loads(json_str)
 
         # Pydantic v2 / v1 兼容
         if hasattr(Decision, "model_validate"):
@@ -542,7 +552,7 @@ def get_long_memory_text(long_memory_pool, user_id, query):
 
 # 创建带工具的对话链
 def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prompt, llm_config, tools):
-    from langgraph.prebuilt import create_react_agent
+    from langchain.agents import create_react_agent
     from langchain_core.messages import SystemMessage
 
     # 检查是否使用 Responses API

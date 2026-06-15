@@ -31,10 +31,10 @@ urllib3
 websockets
 Werkzeug
 httpx[http2]
-langchain>=0.2,<0.3
-langchain-openai>=0.1,<0.2
-langchain-community>=0.2,<0.3
-faiss-cpu>=1.8
+langchain
+langchain-openai
+langchain-community
+faiss-cpu
 pymilvus
 mem0ai
 asyncio
