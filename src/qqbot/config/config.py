@@ -160,7 +160,7 @@ PROMPT = [
 ]
 
 # llm state
-CURRENT_COMPLETION = "FREEGPT"
+CURRENT_COMPLETION = "FREEGPT-NONREASONING"
 
 LLM = {
     "DEEPSEEK-V3": {
@@ -203,6 +203,11 @@ LLM = {
         "URL": "https://newapi.pytrio.asia/v1",
         "NAME": "gpt-5.5,gpt-5.4",
         "USE_RESPONSES_API": True
+    },
+    "FREEGPT-NONREASONING": {
+        "KEY": os.getenv("FREEGPT"),
+        "URL": "https://newapi.pytrio.asia/v1",
+        "NAME": "deepseek-ai/deepseek-v4-pro"
     }
 }
 
