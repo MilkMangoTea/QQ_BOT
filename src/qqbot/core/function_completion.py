@@ -90,7 +90,9 @@ def convert_openai_to_langchain(messages):
 
 def clean_openai_headers(request: httpx.Request):
     for key in list(request.headers.keys()):
-        if key.lower().startswith("x-stainless"):
+        k = key.lower()
+        # 保留 SDK 控制响应解析的内部 header，否则 with_raw_response 流程会崩
+        if k.startswith("x-stainless") and k != "x-stainless-raw-response":
             del request.headers[key]
     request.headers["User-Agent"] = "Mozilla/5.0"
 
