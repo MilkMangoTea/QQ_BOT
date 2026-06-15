@@ -387,18 +387,49 @@ def _extract_message_text(msg) -> str:
 
 
 def _parse_decision_message(msg) -> Decision:
-    text = lc_message_to_text(msg).strip()
+    """解析 LLM 返回的消息为 Decision 对象，兼容多种返回类型"""
+    try:
+        # 处理不同类型的返回值
+        text = ""
 
-    match = re.search(r"\{.*\}", text, re.S)
-    if not match:
-        raise ValueError(f"LLM 未返回 JSON: {text}")
+        # 如果是字符串，直接使用
+        if isinstance(msg, str):
+            text = msg
+        # 如果是 LangChain Message 对象
+        elif hasattr(msg, 'content'):
+            text = lc_message_to_text(msg)
+        # 如果是原始 ChatCompletion 对象 (openai.types.chat.chat_completion.ChatCompletion)
+        elif hasattr(msg, 'choices') and len(msg.choices) > 0:
+            choice = msg.choices[0]
+            if hasattr(choice, 'message') and hasattr(choice.message, 'content'):
+                text = choice.message.content
+            elif hasattr(choice, 'text'):
+                text = choice.text
+        else:
+            # 尝试转换为字符串
+            text = str(msg)
 
-    data = json.loads(match.group(0))
+        text = text.strip()
 
-    if hasattr(Decision, "model_validate"):
-        return Decision.model_validate(data)
+        # 提取 JSON
+        match = re.search(r"\{.*\}", text, re.S)
+        if not match:
+            raise ValueError(f"LLM 未返回 JSON: {text}")
 
-    return Decision.parse_obj(data)
+        data = json.loads(match.group(0))
+
+        # Pydantic v2 / v1 兼容
+        if hasattr(Decision, "model_validate"):
+            return Decision.model_validate(data)
+
+        return Decision.parse_obj(data)
+
+    except Exception as e:
+        print(f"⚠️ 解析 Decision 失败: {e}")
+        print(f"   msg 类型: {type(msg)}")
+        if hasattr(msg, '__dict__'):
+            print(f"   msg 属性: {list(msg.__dict__.keys())[:5]}")
+        raise
 
 def _decision_chain():
     global _CACHED_DECISION_CHAIN
