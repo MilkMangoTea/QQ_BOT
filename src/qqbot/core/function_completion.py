@@ -93,7 +93,6 @@ def clean_openai_headers(request: httpx.Request):
         if key.lower().startswith("x-stainless"):
             del request.headers[key]
     request.headers["User-Agent"] = "Mozilla/5.0"
-    request.headers["Accept"] = "text/event-stream"
 
 HTTPX_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=20.0)
 HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=10.0)

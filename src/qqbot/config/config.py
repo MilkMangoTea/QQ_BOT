@@ -163,10 +163,10 @@ PROMPT = [
 CURRENT_COMPLETION = "FREEGPT-NONREASONING"
 
 LLM = {
-    "DEEPSEEK-V3": {
+    "DEEPSEEK": {
         "KEY": os.getenv("DEEPSEEK"),
         "URL": "https://api.deepseek.com",
-        "NAME": "deepseek-chat"
+        "NAME": "deepseek-v4-pro"
     },
     "ZHIPU": {
         "KEY": os.getenv("ZHIPU"),
@@ -177,11 +177,6 @@ LLM = {
         "KEY": os.getenv("ALI"),
         "URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "NAME": "qwen2.5-vl-72b-instruct"
-    },
-    "DEEPSEEK-R1": {
-        "KEY": os.getenv("DEEPSEEK"),
-        "URL": "https://api.deepseek.com",
-        "NAME": "deepseek-reasoner"
     },
     "ALI-MAX": {
         "KEY": os.getenv("ALI"),
