@@ -552,7 +552,7 @@ def get_long_memory_text(long_memory_pool, user_id, query):
 
 # 创建带工具的对话链
 def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prompt, llm_config, tools):
-    from langchain.agents import create_react_agent
+    from langgraph.prebuilt import create_react_agent
     from langchain_core.messages import SystemMessage
 
     # 检查是否使用 Responses API
