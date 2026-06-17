@@ -194,8 +194,30 @@ async def ai_completion(session_id, user_content):
             # 收集所有包含图片的消息并生成描述（创建新列表，不修改原 memory）
             # 限制：只处理最近的5张图片，其余显示为 [过期图片]
             described_history = []
-            image_count = 0
             MAX_IMAGES = 5
+
+            # —— 先收集所有图片 URL（history 在前、当前输入在后，即时间「旧 → 新」）——
+            _all_img_urls = []
+            for msg in history.messages:
+                if isinstance(msg, HumanMessage) and isinstance(msg.content, list):
+                    for part in msg.content:
+                        if isinstance(part, dict) and part.get("type") == "image_url":
+                            u = part.get("image_url", {}).get("url", "")
+                            if u:
+                                _all_img_urls.append(u)
+            for part in user_content:
+                if isinstance(part, dict) and part.get("type") in ("image_url", "image"):
+                    u = part.get("image_url", {}).get("url", "") if part.get("type") == "image_url" else part.get("url", "")
+                    if u:
+                        _all_img_urls.append(u)
+
+            # —— 按「最后一次出现」去重，再取末尾最新的 MAX_IMAGES 个 ——
+            _seen = []
+            for u in _all_img_urls:
+                if u in _seen:
+                    _seen.remove(u)
+                _seen.append(u)
+            keep_urls = set(_seen[-MAX_IMAGES:])   # 只有这些 URL 会被真正识别
 
             for msg in history.messages:
                 if isinstance(msg, HumanMessage) and isinstance(msg.content, list):
@@ -210,10 +232,9 @@ async def ai_completion(session_id, user_content):
                             elif part.get("type") == "image_url":
                                 img_url = part.get("image_url", {}).get("url", "")
                                 if img_url:
-                                    if image_count < MAX_IMAGES:
+                                    if img_url in keep_urls:
                                         desc = await get_image_description(img_url)
                                         image_descs.append(desc)
-                                        image_count += 1
                                     else:
                                         image_descs.append("[过期图片]")
 
@@ -231,7 +252,7 @@ async def ai_completion(session_id, user_content):
                     # 纯文本用户消息
                     described_history.append(msg)
 
-            # 处理当前输入中的图片（继续使用相同的计数器）
+            # 处理当前输入中的图片
             text_parts = []
             image_descs = []
 
@@ -242,10 +263,9 @@ async def ai_completion(session_id, user_content):
                     elif part.get("type") in ["image_url", "image"]:
                         img_url = part.get("image_url", {}).get("url", "") if part.get("type") == "image_url" else part.get("url", "")
                         if img_url:
-                            if image_count < MAX_IMAGES:
+                            if img_url in keep_urls:
                                 desc = await get_image_description(img_url)
                                 image_descs.append(desc)
-                                image_count += 1
                             else:
                                 image_descs.append("[过期图片]")
 
