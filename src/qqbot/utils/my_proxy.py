@@ -593,12 +593,6 @@ async def qq_bot():
                     if event.get("post_type") != "message":
                         continue
 
-                    my_event = await special_event(event)
-                    if my_event:
-                        if my_event.get("message"):
-                            await send_message(ws, my_event)
-                        continue
-
                     # 所有消息处理都并发执行（锁已在 remember 内部保护 WebSocket 读取）
                     asyncio.create_task(_process_message_concurrent(ws, event))
 
