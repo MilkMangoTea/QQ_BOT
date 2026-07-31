@@ -242,5 +242,5 @@ MEM0_CONFIG = {
             "metric_type": "IP",
         },
     },
-    "version": "v1.1",
+    "version": "v1.0",
 }
