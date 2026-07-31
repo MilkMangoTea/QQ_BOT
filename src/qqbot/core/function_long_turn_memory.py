@@ -23,7 +23,7 @@ class LocalDictStore:
         """
         user_id = str(user_id)
         if query:
-            res = self.m.search(query, user_id=user_id, limit=limit)
+            res = self.m.search(query, filters={"user_id": user_id}, limit=limit)
         else:
             res = self.m.get_all(user_id=user_id)
 
