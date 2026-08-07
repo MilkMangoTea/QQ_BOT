@@ -3,6 +3,7 @@ import threading
 from typing import Dict, Optional
 from mem0 import Memory
 from src.qqbot.config import config
+from src.qqbot.utils.console import out
 
 class LocalDictStore:
     """Mem0 的同步适配层。"""
@@ -20,9 +21,9 @@ class LocalDictStore:
             if self.m is None:
                 try:
                     self.m = Memory.from_config(config.MEM0_CONFIG)
-                    print("✅ Mem0 客户端已就绪")
+                    out("✅ Mem0 客户端已就绪")
                 except Exception as e:
-                    print(f"⚠️ Mem0 初始化失败: {e}")
+                    out("⚠️ Mem0 初始化失败", e)
                     raise
 
         return self.m
@@ -70,5 +71,5 @@ def dic_to_prompt_list(dic):
         return []
     for key, value in dic.items():
         text += f"{key}: {value}\n"
-    list = [{"role": "system", "content": [{"type": "text", "text": text}]}]
-    return list
+    messages = [{"role": "system", "content": [{"type": "text", "text": text}]}]
+    return messages

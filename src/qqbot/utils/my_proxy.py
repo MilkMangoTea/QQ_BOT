@@ -1,33 +1,35 @@
 import asyncio
-import websockets
 import json
 import time
+import traceback
 import uuid
+
+import websockets
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
 from src.qqbot.config import config
 from src.qqbot.config.config import FORTUNE_GROUPS
 from src.qqbot.core.function import (
-    process_single_message,
-    get_nearby_message,
-    special_event,
-    rep,
-    build_params_text_only,
-    ran_rep_text_only,
     build_params,
     build_emoji_params,
     get_available_emojis,
-    get_long_memory_text,
-    MemoryManager,
-    out
+    build_params_text_only,
+    process_single_message,
+    ran_rep_text_only,
+    rep,
 )
 from src.qqbot.core.function_completion import (
+    create_chat_llm,
     create_agent_chain_with_memory,
+    get_long_memory_text,
     lc_message_to_text,
     parse_emoji_reply,
 )
 from src.qqbot.core.function_fortune import setup_daily_fortune_scheduler
 from src.qqbot.core.function_long_turn_memory import LocalDictStore
-from src.qqbot.core.function_session_memory import calc_session_id
+from src.qqbot.core.function_session_memory import MemoryManager, calc_session_id
 from src.qqbot.core.function_tools import TOOLS
+from src.qqbot.utils.console import out
 
 CURRENT_LLM = config.LLM[config.CURRENT_COMPLETION]
 LLM_NAME = CURRENT_LLM["NAME"]
@@ -75,7 +77,7 @@ async def send_action_and_wait(websocket, action, params, timeout=10.0):
         result = await asyncio.wait_for(future, timeout=timeout)
         return result
     except asyncio.TimeoutError:
-        print(f"⏱️ Action {action} 超时")
+        out("⏱️ Action 超时", action)
         return None
     finally:
         _pending_actions.pop(echo_id, None)
@@ -84,9 +86,6 @@ async def send_action_and_wait(websocket, action, params, timeout=10.0):
 async def ai_completion(session_id, user_content):
     """输入会话标识和消息内容，返回生成的文本回复。"""
     try:
-        from langchain_core.messages import HumanMessage
-        import uuid
-
         user_id = session_id.split(":", 1)[-1] if ":" in session_id else session_id
 
         if not user_content:
@@ -102,10 +101,10 @@ async def ai_completion(session_id, user_content):
             )
             out("✅ 长期记忆查询完成", "")
         except asyncio.TimeoutError:
-            print("⏱️ 长期记忆查询超时，跳过")
+            out("⏱️ 长期记忆查询超时，跳过")
             long_mem = "（无）"
         except Exception as e:
-            print(f"⚠️ 长期记忆查询失败: {e}")
+            out("⚠️ 长期记忆查询失败", e)
             long_mem = "（无）"
 
         out("🏁 [ai_completion] 调用 chain, session:", session_id)
@@ -124,9 +123,6 @@ async def ai_completion(session_id, user_content):
                         break
 
         if has_image:
-            from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-            from src.qqbot.core.function_completion import create_chat_llm
-
             names = [s.strip() for s in str(LLM_NAME).split(",") if s.strip()]
             temp_config = CURRENT_LLM.copy()
             temp_config["NAME"] = names[0]
@@ -257,7 +253,6 @@ async def ai_completion(session_id, user_content):
 
             user_content = [{"type": "text", "text": combined_text}]
 
-            import uuid
             temp_session_id = f"{session_id}_temp_{uuid.uuid4().hex[:8]}"
             temp_session = memory_manager.get_or_create_session(temp_session_id)
             temp_session.history.clear()
@@ -293,11 +288,10 @@ async def ai_completion(session_id, user_content):
                             )
                         chain = _CHAIN_CACHE[model_name]
 
-                        from langchain_core.messages import HumanMessage
                         input_msg = HumanMessage(content=user_content)
 
                         if retry_count > 0:
-                            print(f"🔄 模型 {model_name} 第 {retry_count + 1} 次尝试...")
+                            out("🔄 模型重试", f"{model_name}，第 {retry_count + 1} 次")
 
                         emoji_options = get_available_emojis()
                         try:
@@ -317,11 +311,11 @@ async def ai_completion(session_id, user_content):
                             last_err = timeout_err
                             retry_count += 1
                             if retry_count <= max_retries:
-                                print(f"⏱️ 模型 {model_name} 超时 (尝试 {retry_count}/{max_retries + 1})，重试中...")
+                                out("⏱️ 模型超时，准备重试", f"{model_name}，第 {retry_count} 次")
                                 await asyncio.sleep(1)  # 短暂延迟后重试
                                 continue
                             else:
-                                print(f"⏱️ 模型 {model_name} 超时，已达最大重试次数，尝试下一个模型")
+                                out("⏱️ 模型超时，尝试下一个模型", model_name)
                                 break
 
                         if isinstance(response, dict):
@@ -335,9 +329,7 @@ async def ai_completion(session_id, user_content):
                         if not content or "Agent stopped due to" in content:
                             content = "嗯"
 
-                        out("🤖 模型原始输出:", content[:500])
                         content, emoji_name = parse_emoji_reply(content, emoji_options)
-                        out("🎭 模型选择表情:", emoji_name or "（未选择）")
 
                         out("短期记忆：", memory_manager.get_or_create_session(session_id).history)
                         out("✅ 使用模型：", model_name)
@@ -350,7 +342,7 @@ async def ai_completion(session_id, user_content):
                                     assistant_text=content
                                 )
                             except Exception as e:
-                                print("⚠️ [ai_completion] mem0 add_turn 失败：", e)
+                                out("⚠️ Mem0 写入失败", e)
 
                         # 记忆写入不阻塞回复；保留任务引用以便其执行完成。
                         task = asyncio.create_task(asyncio.to_thread(add_long_memory))
@@ -363,11 +355,11 @@ async def ai_completion(session_id, user_content):
                         last_err = e
                         retry_count += 1
                         if retry_count <= max_retries:
-                            print(f"⚠️ 模型 {model_name} 失败 (尝试 {retry_count}/{max_retries + 1}): {e}，重试中...")
+                            out("⚠️ 模型调用失败，准备重试", f"{model_name}: {e}")
                             await asyncio.sleep(1)
                             continue
                         else:
-                            print(f"⚠️ 模型 {model_name} 失败: {e}，已达最大重试次数")
+                            out("⚠️ 模型调用失败，已达最大重试次数", f"{model_name}: {e}")
                             break
         finally:
             if has_image and agent_session_id != session_id:
@@ -376,16 +368,16 @@ async def ai_completion(session_id, user_content):
                         del memory_manager._sessions[agent_session_id]
                         out("🧹 已清理临时描述 session", agent_session_id)
                 except Exception as e:
-                    print(f"⚠️ 清理临时 session 失败: {e}")
+                    out("⚠️ 清理临时会话失败", e)
 
         # 所有模型都失败，返回默认回复
-        print(f"⚠️ [ai_completion] 全部候选模型失败: {last_err}")
-        print("💬 返回默认回复")
+        out("⚠️ 全部候选模型失败", last_err)
+        out("💬 返回默认回复")
         return "嗯"
 
     except Exception as e:
-        print(f"⚠️ [ai_completion] 调用 LLM 发生错误: {e}")
-        print("💬 返回默认回复")
+        out("⚠️ 调用 LLM 发生错误", e)
+        out("💬 返回默认回复")
         return "嗯"
 
 
@@ -401,19 +393,19 @@ async def send_message(websocket, params, action="send_msg", retry_count=3):
                 "params": params
             }))
             if attempt > 0:
-                print(f"✅ [send_message] 重试成功 (第 {attempt + 1} 次尝试)")
+                out("✅ 消息重试成功", f"第 {attempt + 1} 次")
             return True
 
         except (websockets.exceptions.ConnectionClosed, websockets.exceptions.WebSocketException) as e:
-            print(f"⚠️ [send_message] WebSocket 错误 (尝试 {attempt + 1}/{retry_count}): {e}")
+            out("⚠️ WebSocket 发送错误", f"第 {attempt + 1}/{retry_count} 次: {e}")
             if attempt < retry_count - 1:
                 await asyncio.sleep(1)
             else:
-                print(f"❌ [send_message] 发送失败，已达到最大重试次数")
+                out("❌ 消息发送失败，已达到最大重试次数")
                 return False
 
         except Exception as e:
-            print(f"⚠️ [send_message] 未知错误: {e}")
+            out("⚠️ 消息发送异常", e)
             return False
 
     return False
@@ -425,7 +417,7 @@ async def remember(websocket, event):
 
         # 首次收到该会话的消息时，从 NapCat 补齐最近上下文。
         if not memory_manager.is_session_initialized(session_id):
-            print(f"🔍 首次记忆，正在拉取历史消息...")
+            out("🔍 首次记忆，正在拉取历史消息")
 
             msg_type = event.get("message_type")
             key = "group_id" if msg_type == "group" else "user_id"
@@ -480,7 +472,7 @@ async def remember(websocket, event):
         return all_user_content if all_user_content else None
 
     except Exception as e:
-        print(f"⚠️ [remember] 异常: {e}")
+        out("⚠️ 记录会话消息失败", e)
         return None
 
 async def handle_message(websocket, event, user_content):
@@ -512,11 +504,10 @@ async def handle_message(websocket, event, user_content):
             if emoji_params:
                 await send_message(websocket, emoji_params)
 
-        print(f"✅ 已回复 {msg_type} 消息: {content}")
-        print("#######################################")
+        out("✅ 已回复消息", f"{msg_type}: {content}")
 
     except Exception as e:
-        print(f"⚠️ [handle_message] 异常: {e}")
+        out("⚠️ 处理回复失败", e)
 
 
 async def qq_bot():
@@ -526,9 +517,9 @@ async def qq_bot():
         ping_interval=20,  # 每 20 秒发送一次 ping
         ping_timeout=60    # ping 超时时间 60 秒（足够 AI 推理完成）
     ) as ws:
-        print("✅ 成功连接到WebSocket服务器")
+        out("✅ 已连接 WebSocket 服务器")
 
-        fortune_scheduler = setup_daily_fortune_scheduler(
+        setup_daily_fortune_scheduler(
             websocket=ws,
             target_groups=FORTUNE_GROUPS,
             push_hour=8,
@@ -561,12 +552,12 @@ async def qq_bot():
                     asyncio.create_task(_process_message_concurrent(ws, event))
 
                 except json.JSONDecodeError:
-                    print("⚠️ 收到非JSON格式消息")
+                    out("⚠️ 收到非 JSON 格式消息")
                 except Exception as e:
-                    print(f"⚠️ 处理消息时发生错误: {e}")
+                    out("⚠️ 分发消息失败", e)
 
         finally:
-            print("🔌 连接断开，清理悬空的 action 请求...")
+            out("🔌 连接断开，清理悬空 action 请求")
             for fut in list(_pending_actions.values()):
                 if not fut.done():
                     fut.cancel()
@@ -587,9 +578,8 @@ async def _process_message_concurrent(ws, event):
             await handle_message(ws, event, user_content)
 
     except Exception as e:
-        print(f"⚠️ [_process_message_concurrent] 处理消息异常: {e}")
-        import traceback
-        traceback.print_exc()
+        out("⚠️ 并发处理消息失败", e)
+        out("并发处理错误详情", traceback.format_exc())
 
 
 
@@ -601,10 +591,10 @@ if __name__ == "__main__":
         except (websockets.ConnectionClosed, OSError, ConnectionRefusedError, TimeoutError, websockets.InvalidURI,
                 websockets.InvalidHandshake, websockets.WebSocketException):
 
-            print("⏱️ 连接断开，尝试重连...")
+            out("⏱️ 连接断开，尝试重连")
             time.sleep(3)
             continue
 
         except KeyboardInterrupt:
-            print("🚫 程序已终止")
+            out("🚫 程序已终止")
             break

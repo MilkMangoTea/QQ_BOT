@@ -1,21 +1,22 @@
-import base64
-import urllib.parse
-import re
 import json
+import re
+
 import httpx
 from typing import Any, Dict, List
+
 from src.qqbot.config import config
+from src.qqbot.utils.console import out
 
 
 # 请求构建器
-def build_params(type, event, content):
+def build_params(message_kind, event, content):
     msg_type = event.get("message_type")
     base = ""
-    if type == "text":
+    if message_kind == "text":
         if not content:
             content = "嗯"
         base = {"message": [{"type": "text", "data": {"text": content}}]}
-    elif type == "image":
+    elif message_kind == "image":
         base = {
             "message": [{"type": "image", "data": {"file": content, "sub_type": 1, "summary": "[色禽图片]"}}]}
     key = "user_id" if msg_type == "private" else "group_id"
@@ -24,12 +25,12 @@ def build_params(type, event, content):
 # ===== LangChain 相关 =====
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate
 from langchain_core.caches import InMemoryCache
 from langchain_core.globals import set_llm_cache
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.runnables import RunnableLambda
+from langgraph.prebuilt import create_react_agent
 
 
 _IMG_TYPES = {"image", "img", "photo", "picture", "sticker"}
@@ -468,10 +469,10 @@ def _parse_decision_message(msg) -> Decision:
         return Decision.parse_obj(data)
 
     except Exception as e:
-        print(f"⚠️ 解析 Decision 失败: {e}")
-        print(f"   msg 类型: {type(msg)}")
+        out("⚠️ 解析 Decision 失败", e)
+        out("消息类型", type(msg))
         if hasattr(msg, '__dict__'):
-            print(f"   msg 属性: {list(msg.__dict__.keys())[:5]}")
+            out("消息属性", list(msg.__dict__.keys())[:5])
         raise
 
 def _decision_chain():
@@ -513,11 +514,11 @@ def should_reply_langchain(event: Dict[str, Any], memory_manager, session_id: st
         dec = _decision_chain().invoke({"ctx": ctx, "user_message": curr_text})
 
         if dec is None:
-            print(f"⚠️ LangChain 返回 None，可能 LLM 输出格式错误")
+            out("⚠️ LangChain 返回 None")
             return False
 
         if not hasattr(dec, 'should_reply'):
-            print(f"⚠️ LangChain 返回对象缺少 should_reply 属性: {type(dec)}")
+            out("⚠️ LangChain 返回对象缺少 should_reply", type(dec))
             return False
 
         should = bool(dec.should_reply)
@@ -526,7 +527,7 @@ def should_reply_langchain(event: Dict[str, Any], memory_manager, session_id: st
         interest = getattr(dec, 'interest', 0.0)
         confidence = getattr(dec, 'confidence', 0.0)
 
-        print("LC 判定:", {
+        out("LC 判定", {
             "should": should,
             "target": target,
             "cat": category,
@@ -548,14 +549,14 @@ def should_reply_langchain(event: Dict[str, Any], memory_manager, session_id: st
 
         if is_proactive and not directed_to_bot:
             if memory_manager.recent_bot_proactive_reply(session_id, within_seconds=300):
-                print("🔇 主动参与冷却中，跳过回复")
+                out("🔇 主动参与冷却中")
                 return False
             memory_manager.mark_proactive_reply(session_id)
 
         return True
 
     except Exception as e:
-        print(f"⚠️ LangChain 判定失败: {e}")
+        out("⚠️ LangChain 判定失败", e)
         return False
 
 def get_long_memory_text(long_memory_pool, user_id, query):
@@ -571,11 +572,8 @@ def get_long_memory_text(long_memory_pool, user_id, query):
 
 def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prompt, llm_config, tools):
     """创建包含会话上下文、长期记忆和工具调用的对话链。"""
-    from langgraph.prebuilt import create_react_agent
-    from langchain_core.messages import SystemMessage
-
     if llm_config.get("USE_RESPONSES_API"):
-        print("⚠️ Responses API 模式暂不支持工具调用，使用简单 LLM 模式")
+        out("⚠️ Responses API 模式不支持工具调用，使用简单 LLM 模式")
         llm = create_chat_llm(llm_config)
         agent_executor = None
         persona_llm = llm
@@ -648,7 +646,7 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
                     final_answer = lc_message_to_text(llm_response).strip()
                     return {"output": final_answer or "嗯"}
                 except Exception as e:
-                    print(f"⚠️ LLM 调用失败: {e}")
+                    out("⚠️ LLM 调用失败", e)
                     return {"output": "嗯"}
 
             result = agent_executor.invoke({"messages": [("user", full_input)]})
@@ -681,7 +679,7 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
                     final_answer = lc_message_to_text(persona_response).strip()
                     return {"output": final_answer}
                 except Exception as e:
-                    print(f"⚠️ 人格包装失败: {e}")
+                    out("⚠️ 人格包装失败", e)
                     return {"output": raw_answer}
 
             return {"output": raw_answer if raw_answer else "嗯"}

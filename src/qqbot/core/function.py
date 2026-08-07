@@ -1,17 +1,13 @@
 import json
 import random
-from pathlib import Path
+
 from src.qqbot.config import config
 from src.qqbot.core.function_completion import (
-    should_reply_langchain,
     build_params,
-    get_long_memory_text
+    should_reply_langchain,
 )
-from src.qqbot.core.function_cmd import special_event
-from src.qqbot.core.function_session_memory import (
-    calc_session_id,
-    MemoryManager
-)
+from src.qqbot.core.function_session_memory import calc_session_id
+from src.qqbot.utils.console import out
 from src.qqbot.utils.image_uploader import get_image_url_or_fallback
 
 # 随机文字池子
@@ -53,7 +49,7 @@ def rep(event, memory_manager):
         session_id = calc_session_id(event)
         return should_reply_langchain(event, memory_manager, session_id)
     except Exception as e:
-        print(f"⚠️ [rep] NLP 调用异常: {e}")
+        out("⚠️ NLP 调用异常", e)
         return False
 
 
@@ -75,21 +71,16 @@ def get_available_emojis():
 async def build_emoji_params(event, emoji_name):
     """将模型选择的本地表情转换为图片消息参数。"""
     if emoji_name not in get_available_emojis():
-        print(f"⚠️ 忽略不可用的表情: {emoji_name}")
+        out("⚠️ 忽略不可用的表情", emoji_name)
         return None
 
     emoji_path = config.EMOJI_ASSET_DIR / emoji_name
     if not emoji_path.is_file():
-        print(f"⚠️ 表情文件不存在: {emoji_path}")
+        out("⚠️ 表情文件不存在", emoji_path)
         return None
 
     image_file = await get_image_url_or_fallback(emoji_path.read_bytes())
     return build_params("image", event, image_file)
-
-
-# 日志输出
-def out(tip, content):
-    print(f"----------\n{tip}\n{content}\n----------")
 
 
 # 导入最近聊天消息
@@ -115,7 +106,7 @@ async def get_nearby_message(websocket, event, llm):
         return []
 
     except Exception as e:
-        print("⚠️ 获取群聊消息时发生错误:", str(e))
+        out("⚠️ 获取群聊消息失败", e)
         return []
 
 # 处理一条 CQ 消息，生成可直接塞进 handle_pool 的列表

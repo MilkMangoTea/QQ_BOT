@@ -4,7 +4,10 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
+from langchain_core.messages import AIMessage, HumanMessage
 from src.qqbot.config.config import SELF_USER_ID
+from src.qqbot.utils.console import out
+from src.qqbot.utils.image_uploader import get_image_url_or_fallback
 
 
 @dataclass
@@ -49,14 +52,14 @@ class MemoryManager:
 
         # 会话过期处理：直接清空
         if session is not None and session.is_expired(self._timeout):
-            print(f"⏰ 会话 {session_id} 已过期，清空记忆")
+            out("⏰ 会话已过期，清空记忆", session_id)
             session = None
 
         # 创建新会话
         if session is None:
             session = SessionMemory()
             self._sessions[session_id] = session
-            print(f"🆕 创建新会话: {session_id}")
+            out("🆕 创建新会话", session_id)
 
         session.touch()
         return session
@@ -77,9 +80,6 @@ class MemoryManager:
         session.history.clear()
 
         # 填充历史消息
-        from langchain_core.messages import HumanMessage, AIMessage
-        from src.qqbot.utils.image_uploader import get_image_url_or_fallback
-
         for msg in messages[-self._context_window:]:
             try:
                 user_id = msg.get("user_id")
@@ -139,11 +139,11 @@ class MemoryManager:
                     session.history.add_message(HumanMessage(content=content_parts))
 
             except Exception as e:
-                print(f"⚠️ 处理历史消息失败: {e}")
+                out("⚠️ 处理历史消息失败", e)
                 continue
 
         session.is_initialized = True
-        print(f"✅ 会话 {session_id} 已初始化，加载 {len(session.history.messages)} 条历史")
+        out("✅ 会话历史已初始化", f"{session_id}，加载 {len(session.history.messages)} 条")
 
     def get_history(self, session_id: str) -> BaseChatMessageHistory:
         """
@@ -181,7 +181,6 @@ class MemoryManager:
             return
         session = self.get_or_create_session(session_id)
 
-        from langchain_core.messages import HumanMessage
         if isinstance(content, str):
             session.history.add_user_message(content)
         else:
@@ -271,7 +270,7 @@ class MemoryManager:
     def reset_session(self, session_id: str) -> SessionMemory:
         session = SessionMemory()
         self._sessions[session_id] = session
-        print(f"🔄 手动重置会话: {session_id}")
+        out("🔄 手动重置会话", session_id)
         return session
     # 获取会话统计信息（调试用）
     def get_stats(self, session_id: str) -> dict:

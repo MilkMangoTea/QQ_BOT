@@ -1,6 +1,8 @@
 from src.qqbot.config import config
 from src.qqbot.core.function_image_providers import fetch_acg_one
+from src.qqbot.utils.console import out
 from src.qqbot.utils.image_uploader import get_image_url_or_fallback
+
 
 def _extract_cmd_text_from_event(msg_list, prefix="/s"):
     """
@@ -57,7 +59,7 @@ async def special_event(event):
 
         parts = cmd_text.split()
         if len(parts) < 2:
-            route["message"] = [{"type":"text","data":{"text":"⚠️ 用法：/s img <标签...> [r18] ｜ /s 群聊|私聊 <ID>"}}]
+            route["message"] = [{"type": "text", "data": {"text": "⚠️ 用法：/s img <标签...> [r18] ｜ /s 群聊|私聊 <ID>"}}]
             return route
 
         subcmd = parts[1]
@@ -80,6 +82,7 @@ async def special_event(event):
             try:
                 url, src = fetch_acg_one(tags=tags, r18=r18)  # 默认非 r18；带 r18 才开启
             except Exception as e:
+                out("⚠️ 图片命令取图失败", e)
                 url, src = None, None
 
             if url:
@@ -87,11 +90,11 @@ async def special_event(event):
                 final_url = await get_image_url_or_fallback(url)
 
                 route["message"] = [
-                    {"type":"text","data":{"text": f"[{src}] "}},
-                    {"type":"image","data":{"file": final_url}}
+                    {"type": "text", "data": {"text": f"[{src}] "}},
+                    {"type": "image", "data": {"file": final_url}},
                 ]
             else:
-                route["message"] = [{"type":"text","data":{"text":"没找到符合标签的图片 :("}}]
+                route["message"] = [{"type": "text", "data": {"text": "没找到符合标签的图片 :("}}]
 
             # 输出预览
             try:
@@ -100,9 +103,9 @@ async def special_event(event):
                     first = route["message"][0]
                     if first.get("type") == "text":
                         preview = (first.get("data") or {}).get("text", "")
-                print("----------\n图片请求结果\n" + preview + "\n----------")
-            except Exception:
-                pass
+                out("图片请求结果", preview)
+            except Exception as e:
+                out("⚠️ 输出图片请求结果失败", e)
 
             return route  # 含 message：主循环直接发送，跳过大模型
 
@@ -110,28 +113,28 @@ async def special_event(event):
         if subcmd in ("群聊", "私聊"):
             # 仅限私聊 + 指定用户
             if event.get("message_type") == "group":
-                route["message"] = [{"type":"text","data":{"text":"⚠️ 控制台命令仅限私聊使用"}}]
+                route["message"] = [{"type": "text", "data": {"text": "⚠️ 控制台命令仅限私聊使用"}}]
                 return route
             if event.get("user_id") != config.TARGET_USER_ID:
-                route["message"] = [{"type":"text","data":{"text":"⚠️ 无权使用控制台命令"}}]
+                route["message"] = [{"type": "text", "data": {"text": "⚠️ 无权使用控制台命令"}}]
                 return route
 
             if len(parts) != 3 or parts[2] not in config.ALLOWED_GROUPS:
-                route["message"] = [{"type":"text","data":{"text":"⚠️ 用法：/s 群聊|私聊 <ID>（需在白名单）"}}]
+                route["message"] = [{"type": "text", "data": {"text": "⚠️ 用法：/s 群聊|私聊 <ID>（需在白名单）"}}]
                 return route
 
             target_type, target_id = subcmd, parts[2]
             if target_type == "群聊":
-                print(f"💬 正在向群 {target_id} 发送消息")
+                out("💬 正在向群发送消息", target_id)
                 return {"message_type": "group", "group_id": target_id}
             else:
-                print(f"💬 正在向用户 {target_id} 发送消息")
+                out("💬 正在向用户发送消息", target_id)
                 return {"message_type": "private", "user_id": target_id}
 
         # ---------- 未知子命令 ----------
-        route["message"] = [{"type":"text","data":{"text":"⚠️ 未知子命令。可用：img/图片、群聊、私聊"}}]
+        route["message"] = [{"type": "text", "data": {"text": "⚠️ 未知子命令。可用：img/图片、群聊、私聊"}}]
         return route
 
     except Exception as e:
-        print(f"❗ special_event 处理失败: {e}")
+        out("❗ special_event 处理失败", e)
         return None

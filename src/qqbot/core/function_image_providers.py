@@ -1,9 +1,12 @@
 import os
 import random
 import datetime
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+from src.qqbot.utils.console import out
 
 # ========== Proxy & Session ==========
 PROXY_URL = os.environ.get("ACG_PROXY", "http://127.0.0.1:7890")
@@ -238,7 +241,7 @@ def fetch_acg_one(tags, prefer=("pixiv","danbooru","yandere","gelbooru","lolicon
 
     for src in prefer:
         try:
-            print(f"尝试从 {src} 取图...")
+            out("尝试取图", src)
             if src == "danbooru":
                 url = fetch_danbooru_one(tags, rating=dan_rating)
             elif src == "yandere":
@@ -254,6 +257,6 @@ def fetch_acg_one(tags, prefer=("pixiv","danbooru","yandere","gelbooru","lolicon
             if url:
                 return url, src
         except Exception as e:
-            print(f"⚠️ 从 {src} 取图失败: {e}")
+            out("⚠️ 取图失败", f"{src}: {e}")
             continue
     return None, None

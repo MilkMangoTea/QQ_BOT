@@ -1,8 +1,16 @@
+import asyncio
 import json
 import random
+import time
+import traceback
 from pathlib import Path
 from typing import List, Tuple
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from PIL import Image, ImageDraw, ImageFont
+
+from src.qqbot.utils.console import out
 from src.qqbot.utils.image_uploader import get_image_url_or_fallback
 
 # ===== 配置 =====
@@ -21,7 +29,7 @@ THEME_CONFIG = {
     "touhou_lostword": {"enabled": True, "weight": 10},
     "hoshizora": {"enabled": True, "weight": 5},
     "mmt": {"enabled": True, "weight": 1},
-    "gura": {"enabled": True, "weight": 4}
+    "gura": {"enabled": True, "weight": 4},
 }
 
 
@@ -42,7 +50,7 @@ def get_copywriting() -> Tuple[str, str]:
             return title, text
 
     except Exception as e:
-        print(f"⚠️ 读取文案失败: {e}")
+        out("⚠️ 读取运势文案失败", e)
         return "今日运势", "今天也要加油哦！"
 
 
@@ -162,14 +170,16 @@ def drawing(theme: str = "random") -> Path:
             ttfront = ImageFont.truetype(str(title_font_path), font_size)
         else:
             ttfront = ImageFont.load_default()
-    except:
+    except Exception as e:
+        out("⚠️ 加载标题字体失败", e)
         ttfront = ImageFont.load_default()
 
     # 获取标题宽度
     try:
         bbox = draw.textbbox((0, 0), title, font=ttfront)
         font_length = (bbox[2] - bbox[0], bbox[3] - bbox[1])
-    except:
+    except Exception as e:
+        out("⚠️ 计算标题尺寸失败", e)
         font_length = (len(title) * font_size * 0.6, font_size)
 
     # 绘制标题
@@ -193,7 +203,8 @@ def drawing(theme: str = "random") -> Path:
             ttfront = ImageFont.truetype(str(text_font_path), font_size)
         else:
             ttfront = ImageFont.load_default()
-    except:
+    except Exception as e:
+        out("⚠️ 加载正文字体失败", e)
         ttfront = ImageFont.load_default()
 
     slices, result = decrement(text)
@@ -215,7 +226,6 @@ def drawing(theme: str = "random") -> Path:
         OUT_PATH.mkdir(exist_ok=True, parents=True)
 
     # 使用时间戳作为文件名
-    import time
     timestamp = int(time.time())
     out_path = OUT_PATH / f"fortune_{timestamp}.png"
 
@@ -232,11 +242,8 @@ async def send_daily_fortune(websocket, group_id: int, theme: str = "random"):
     :param group_id: 群号
     :param theme: 主题名称
     """
-    import json
-    import base64
-
     try:
-        print(f"🎴 正在为群 {group_id} 生成运势卡片...")
+        out("🎴 正在生成运势卡片", group_id)
 
         # 生成运势卡片
         img_path = drawing(theme)
@@ -259,18 +266,17 @@ async def send_daily_fortune(websocket, group_id: int, theme: str = "random"):
             }
         }))
 
-        print(f"✅ 已向群 {group_id} 发送运势卡片")
+        out("✅ 已发送运势卡片", group_id)
 
         # 清理临时文件
         try:
             img_path.unlink()
-        except:
-            pass
+        except Exception as e:
+            out("⚠️ 清理临时运势图片失败", e)
 
     except Exception as e:
-        print(f"⚠️ 向群 {group_id} 发送运势失败: {e}")
-        import traceback
-        traceback.print_exc()
+        out("⚠️ 发送运势失败", f"群 {group_id}: {e}")
+        out("运势发送错误详情", traceback.format_exc())
 
 
 # 定时任务
@@ -291,24 +297,20 @@ def setup_daily_fortune_scheduler(
     :param push_minute: 推送分钟（0-59）
     :param theme: 主题名称（"random" 表示随机）
     """
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    from apscheduler.triggers.cron import CronTrigger
-    import asyncio
-
     scheduler = AsyncIOScheduler()
 
     async def daily_fortune_task():
         """每日运势推送任务"""
-        print(f"🔮 开始推送每日运势...")
+        out("🔮 开始推送每日运势")
 
         for group_id in target_groups:
             try:
                 await send_daily_fortune(websocket, group_id, theme)
                 await asyncio.sleep(3)  # 避免发送过快
             except Exception as e:
-                print(f"⚠️ 向群 {group_id} 推送失败: {e}")
+                out("⚠️ 推送运势失败", f"群 {group_id}: {e}")
 
-        print(f"✅ 每日运势推送完成")
+        out("✅ 每日运势推送完成")
 
     # 添加定时任务
     scheduler.add_job(
@@ -319,7 +321,7 @@ def setup_daily_fortune_scheduler(
     )
 
     scheduler.start()
-    print(f"⏰ 每日运势定时推送已启动: 每天 {push_hour:02d}:{push_minute:02d}")
+    out("⏰ 每日运势定时推送已启动", f"每天 {push_hour:02d}:{push_minute:02d}")
 
     return scheduler
 
@@ -331,8 +333,6 @@ def cleanup_old_images(days: int = 7):
     清理旧的运势图片
     :param days: 保留最近几天的图片
     """
-    import time
-
     if not OUT_PATH.exists():
         return
 
@@ -342,6 +342,6 @@ def cleanup_old_images(days: int = 7):
         try:
             if file.stat().st_mtime < cutoff:
                 file.unlink()
-                print(f"🗑️ 清理旧图片: {file.name}")
-        except:
-            pass
+                out("🗑️ 清理旧运势图片", file.name)
+        except Exception as e:
+            out("⚠️ 清理旧运势图片失败", e)
