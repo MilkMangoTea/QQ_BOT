@@ -335,10 +335,11 @@ async def ai_completion(session_id, user_content):
                         if not content or "Agent stopped due to" in content:
                             content = "嗯"
 
+                        out("🤖 模型原始输出:", content[:500])
                         content, emoji_name = parse_emoji_reply(content, emoji_options)
+                        out("🎭 模型选择表情:", emoji_name or "（未选择）")
 
                         out("短期记忆：", memory_manager.get_or_create_session(session_id).history)
-                        out("原始信息：", content)
                         out("✅ 使用模型：", model_name)
 
                         def add_long_memory():
@@ -509,12 +510,7 @@ async def handle_message(websocket, event, user_content):
         if emoji_name:
             emoji_params = await build_emoji_params(event, emoji_name)
             if emoji_params:
-                emoji_action = (
-                    "send_group_msg"
-                    if event.get("message_type") == "group"
-                    else "send_private_msg"
-                )
-                await send_message(websocket, emoji_params, action=emoji_action)
+                await send_message(websocket, emoji_params)
 
         print(f"✅ 已回复 {msg_type} 消息: {content}")
         print("#######################################")

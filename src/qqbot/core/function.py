@@ -73,7 +73,7 @@ def get_available_emojis():
 
 
 async def build_emoji_params(event, emoji_name):
-    """将模型选择的本地表情转换为 NapCat 图片消息参数。"""
+    """将模型选择的本地表情转换为图片消息参数。"""
     if emoji_name not in get_available_emojis():
         print(f"⚠️ 忽略不可用的表情: {emoji_name}")
         return None
@@ -83,11 +83,8 @@ async def build_emoji_params(event, emoji_name):
         print(f"⚠️ 表情文件不存在: {emoji_path}")
         return None
 
-    key = "group_id" if event.get("message_type") == "group" else "user_id"
-    return {
-        key: event[key],
-        "message": [{"type": "image", "data": {"file": str(emoji_path.resolve())}}],
-    }
+    image_file = await get_image_url_or_fallback(emoji_path.read_bytes())
+    return build_params("image", event, image_file)
 
 
 # 日志输出
