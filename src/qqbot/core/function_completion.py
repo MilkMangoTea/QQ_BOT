@@ -560,19 +560,14 @@ def should_reply_langchain(event: Dict[str, Any], memory_manager, session_id: st
 
 def get_long_memory_text(long_memory_pool, user_id, query):
     """检索用户相关的长期记忆，并转换为提示文本。"""
-
-    try:
-        mem_dic = long_memory_pool.get(user_id, query=query)
-        if not mem_dic or not isinstance(mem_dic, dict):
-            return "（无）"
-
-        lines = []
-        for key, val in mem_dic.items():
-            lines.append(f"• {key}: {val}")
-        return "\n".join(lines) if lines else "（无）"
-    except Exception as e:
-        print(f"⚠️ 获取长期记忆失败: {e}")
+    mem_dic = long_memory_pool.get(user_id, query=query)
+    if not mem_dic or not isinstance(mem_dic, dict):
         return "（无）"
+
+    lines = []
+    for key, val in mem_dic.items():
+        lines.append(f"• {key}: {val}")
+    return "\n".join(lines) if lines else "（无）"
 
 def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prompt, llm_config, tools):
     """创建包含会话上下文、长期记忆和工具调用的对话链。"""

@@ -36,10 +36,10 @@ class LocalDictStore:
         memory = self._get_client()
 
         try:
-            res = memory.search(query, user_id=user_id, limit=limit)
-        except TypeError:
-            # 兼容仍使用 filters 参数的 Mem0 版本。
             res = memory.search(query, filters={"user_id": user_id}, limit=limit)
+        except TypeError:
+            # 兼容支持顶层 user_id 参数的 Mem0 版本。
+            res = memory.search(query, user_id=user_id, limit=limit)
 
         items = res.get("results", []) if isinstance(res, dict) else (res or [])
         dic: Dict[str, str] = {}
