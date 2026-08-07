@@ -34,6 +34,7 @@ httpx[http2]
 langchain
 langchain-openai
 langchain-community
+langgraph
 faiss-cpu
 pymilvus
 mem0ai

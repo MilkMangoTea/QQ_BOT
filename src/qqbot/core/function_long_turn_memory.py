@@ -1,31 +1,45 @@
 import re
+import threading
 from typing import Dict, Optional
 from mem0 import Memory
 from src.qqbot.config import config
 
-# 初始化 Mem0 客户端
-MEMORY = Memory.from_config(config.MEM0_CONFIG)
-
 class LocalDictStore:
-    """
-    mem0 封装：
-    - get(record_id)  -> 从 mem0 拉该用户的所有记忆，拼成一个简单的 {key: value} dict
-    - set(record_id, key, value) -> 把单条记忆写到 mem0
-    """
+    """Mem0 的同步适配层。"""
 
     def __init__(self, *args, **kwargs):
-        self.m = MEMORY
+        self.m = None
+        self._init_lock = threading.Lock()
+
+    def _get_client(self):
+        """返回已初始化的 Mem0 客户端；初始化失败时允许下次请求重试。"""
+        if self.m is not None:
+            return self.m
+
+        with self._init_lock:
+            if self.m is None:
+                try:
+                    self.m = Memory.from_config(config.MEM0_CONFIG)
+                    print("✅ Mem0 客户端已就绪")
+                except Exception as e:
+                    print(f"⚠️ Mem0 初始化失败: {e}")
+                    raise
+
+        return self.m
 
     def get(self, user_id: str, query: Optional[str] = None, limit: int = 3) -> Dict[str, str]:
-        """
-        query 有就 search；没有就 get_all
-        返回 dict 给 dic_to_prompt_list 用
-        """
+        """按查询文本检索用户记忆。空查询不读取长期记忆。"""
         user_id = str(user_id)
-        if query:
-            res = self.m.search(query, filters={"user_id": user_id}, limit=limit)
-        else:
-            res = self.m.get_all(user_id=user_id)
+        if not query or not query.strip():
+            return {}
+
+        memory = self._get_client()
+
+        try:
+            res = memory.search(query, user_id=user_id, limit=limit)
+        except TypeError:
+            # 兼容仍使用 filters 参数的 Mem0 版本。
+            res = memory.search(query, filters={"user_id": user_id}, limit=limit)
 
         items = res.get("results", []) if isinstance(res, dict) else (res or [])
         dic: Dict[str, str] = {}
@@ -35,15 +49,18 @@ class LocalDictStore:
                 dic[f"mem_{i}"] = text
         return dic
 
-    # mem0 自动抽记忆
     def add_turn(self, user_id: str, user_text: str, assistant_text: str):
+        """将一轮对话交给 Mem0 提取并保存记忆。"""
         user_id = str(user_id)
         user_text = re.sub(r"^[^:：]{1,30}\s*[:：]\s*", "", user_text).strip()
+        if not user_text or not assistant_text:
+            return
+
         messages = [
             {"role": "user", "content": user_text},
             {"role": "assistant", "content": assistant_text},
         ]
-        self.m.add(messages, user_id=user_id)
+        self._get_client().add(messages, user_id=user_id)
 
 
 # 将字典转化为序列

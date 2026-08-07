@@ -1,5 +1,6 @@
 import json
 import random
+from pathlib import Path
 from src.qqbot.config import config
 from src.qqbot.core.function_completion import (
     should_reply_langchain,
@@ -56,13 +57,37 @@ def rep(event, memory_manager):
         return False
 
 
-# 表情随机器
-def ran_emoji():
-    return random.randint(1, 100) <= config.RAN_EMOJI_PROBABILITY
+_EMOJI_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
 
-def ran_emoji_content(event):
-    return build_params("image", event, random.choice(config.EMOJI_POOL))
+def get_available_emojis():
+    """返回模型可选择的本地表情文件名。"""
+    emojis = []
+    if config.EMOJI_ASSET_DIR.is_dir():
+        emojis = sorted(
+            path.name
+            for path in config.EMOJI_ASSET_DIR.iterdir()
+            if path.is_file() and path.suffix.lower() in _EMOJI_SUFFIXES
+        )
+    return emojis
+
+
+async def build_emoji_params(event, emoji_name):
+    """将模型选择的本地表情转换为 NapCat 图片消息参数。"""
+    if emoji_name not in get_available_emojis():
+        print(f"⚠️ 忽略不可用的表情: {emoji_name}")
+        return None
+
+    emoji_path = config.EMOJI_ASSET_DIR / emoji_name
+    if not emoji_path.is_file():
+        print(f"⚠️ 表情文件不存在: {emoji_path}")
+        return None
+
+    key = "group_id" if event.get("message_type") == "group" else "user_id"
+    return {
+        key: event[key],
+        "message": [{"type": "image", "data": {"file": str(emoji_path.resolve())}}],
+    }
 
 
 # 日志输出
@@ -70,7 +95,7 @@ def out(tip, content):
     print(f"----------\n{tip}\n{content}\n----------")
 
 
-# 导入最近十条聊天消息
+# 导入最近聊天消息
 async def get_nearby_message(websocket, event, llm):
     try:
         msg_type = event.get("message_type")

@@ -28,3 +28,4 @@ build/
 *.json
 *.sh
 tests/yuri_note.txt
+AGENTS.md

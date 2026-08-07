@@ -94,6 +94,7 @@ BOT_QQ_ID=987654321            # 机器人的 QQ 号
 # ========== 可选配置 ==========
 # 图片功能（可选）
 PIXIV_REFRESH_TOKEN="xxx"      # Pixiv 刷新令牌（用于图片搜索）
+EMOJI_ASSET_DIR="fortune_resources/emoji"  # 本地表情目录
 
 # 长期记忆功能（可选）
 ZILLIZ_API_KEY="xxx"           # Zilliz Cloud API Key（Milvus 向量数据库）
@@ -166,8 +167,8 @@ LLM = {
 # 随机回复概率（1-100），数字越大越活跃
 RAN_REP_PROBABILITY = 3
 
-# 表情回复概率（1-100）
-RAN_EMOJI_PROBABILITY = 20
+# 表情回复
+# 将图片放入 fortune_resources/emoji/；模型会自行决定是否发送以及选择哪一张
 
 # 会话记忆超时时间（秒）
 HISTORY_TIMEOUT = 600  # 10 分钟
@@ -772,4 +773,3 @@ await on_message(test_message)
 如有问题或建议，欢迎提交 [Issue](https://github.com/your-repo/issues)
 
 </div>
-

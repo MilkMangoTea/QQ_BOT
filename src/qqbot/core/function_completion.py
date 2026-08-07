@@ -170,6 +170,38 @@ def lc_message_to_text(msg) -> str:
     return lc_content_to_text(getattr(msg, "content", msg))
 
 
+def emoji_reply_instruction(emoji_options) -> str:
+    """生成要求模型返回回复与表情选择的输出格式说明。"""
+    choices = json.dumps(emoji_options, ensure_ascii=False)
+    return f"""
+【输出格式】
+只返回 JSON：{{"reply": "回复文本", "emoji": null}}。
+emoji 只能为 null 或以下列表中的一个完整值：{choices}。
+仅在表情能自然补充语气时选择它；不要在 reply 中写入文件名或 JSON 以外的内容。
+"""
+
+
+def parse_emoji_reply(content, emoji_options):
+    """解析模型输出；格式不符合要求时保留原始文本且不发送表情。"""
+    text = lc_message_to_text(content).strip()
+    match = re.search(r"\{.*\}", text, re.S)
+    if not match:
+        return text, None
+
+    try:
+        payload = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return text, None
+
+    reply = payload.get("reply")
+    emoji = payload.get("emoji")
+    if not isinstance(reply, str) or not reply.strip():
+        return text, None
+    if emoji not in emoji_options:
+        emoji = None
+    return reply.strip(), emoji
+
+
 # few-shot 示例
 _EXAMPLES = [
     # 正例：应该回复的情况
@@ -380,7 +412,7 @@ def _make_llm():
 
 set_llm_cache(InMemoryCache())
 
-# 缓存 decision chain，避免每次都创建新实例
+# 回复判定链缓存
 _CACHED_DECISION_CHAIN = None
 
 def _extract_message_text(msg) -> str:
@@ -480,12 +512,10 @@ def should_reply_langchain(event: Dict[str, Any], memory_manager, session_id: st
     try:
         dec = _decision_chain().invoke({"ctx": ctx, "user_message": curr_text})
 
-        # 检查返回值是否为 None 或无效
         if dec is None:
             print(f"⚠️ LangChain 返回 None，可能 LLM 输出格式错误")
             return False
 
-        # 检查是否有必需的属性
         if not hasattr(dec, 'should_reply'):
             print(f"⚠️ LangChain 返回对象缺少 should_reply 属性: {type(dec)}")
             return False
@@ -505,27 +535,21 @@ def should_reply_langchain(event: Dict[str, Any], memory_manager, session_id: st
             "curr": curr_text[:48]
         })
 
-        # 如果模型判定不应该回复，直接返回 False
         if not should:
             return False
 
-        # 被动答疑：target=BOT 时可以回复
         directed_to_bot = (target == "BOT")
 
-        # 主动参与：target=GROUP 且 category 属于可主动参与的类型
         proactive_categories = {"TOPIC", "CHITCHAT", "OTHER"}
         is_proactive = (target == "GROUP" and category in proactive_categories)
 
-        # 置信度过滤（修复问题6：在标记冷却之前进行置信度过滤）
         if confidence < 0.55 and category not in {"QUESTION", "FOLLOWUP"}:
             return False
 
-        # 如果是主动参与，检查冷却
         if is_proactive and not directed_to_bot:
             if memory_manager.recent_bot_proactive_reply(session_id, within_seconds=300):
                 print("🔇 主动参与冷却中，跳过回复")
                 return False
-            # 所有过滤通过后，标记本次为主动回复（修复问题6）
             memory_manager.mark_proactive_reply(session_id)
 
         return True
@@ -534,8 +558,8 @@ def should_reply_langchain(event: Dict[str, Any], memory_manager, session_id: st
         print(f"⚠️ LangChain 判定失败: {e}")
         return False
 
-# 从长期记忆池获取相关记忆并格式化为文本
 def get_long_memory_text(long_memory_pool, user_id, query):
+    """检索用户相关的长期记忆，并转换为提示文本。"""
 
     try:
         mem_dic = long_memory_pool.get(user_id, query=query)
@@ -550,21 +574,17 @@ def get_long_memory_text(long_memory_pool, user_id, query):
         print(f"⚠️ 获取长期记忆失败: {e}")
         return "（无）"
 
-# 创建带工具的对话链
 def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prompt, llm_config, tools):
+    """创建包含会话上下文、长期记忆和工具调用的对话链。"""
     from langgraph.prebuilt import create_react_agent
     from langchain_core.messages import SystemMessage
 
-    # 检查是否使用 Responses API
     if llm_config.get("USE_RESPONSES_API"):
-        # Responses API 模式：不支持工具调用，回退到简单模式
         print("⚠️ Responses API 模式暂不支持工具调用，使用简单 LLM 模式")
         llm = create_chat_llm(llm_config)
-        # 不创建 Agent，直接使用 LLM
         agent_executor = None
         persona_llm = llm
     else:
-        # 普通模式：支持工具调用
         agent_system_message = """你是一个智能助手，需要根据用户输入决定是否使用工具，并给出客观回复。
 
 关键规则：
@@ -591,18 +611,14 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
             else:
                 history_msgs = []
 
-            # 提取当前输入内容（用于去重比对）
             input_msgs = inputs.get("input", [])
             input_text = ""
             for msg in input_msgs:
                 if hasattr(msg, 'content'):
                     input_text = lc_message_to_text(msg)
 
-            # 修复新bug4/5：按文本内容比对去重（统一图文场景）
-            # 跳过与当前输入文本完全相同的历史消息
             history_lines = []
             for msg in history_msgs:
-                # 如果是 HumanMessage 且文本与当前输入完全相同，跳过
                 if isinstance(msg, HumanMessage) and input_text:
                     if lc_message_to_text(msg) == input_text:
                         continue
@@ -614,21 +630,24 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
             history_text = "\n".join(history_lines)
 
             long_memory = inputs.get("long_memory", "")
+
+            emoji_options = inputs.get("emoji_options", [])
+            output_instruction = emoji_reply_instruction(emoji_options)
+
             context = f"【相关长期记忆】\n{long_memory}\n\n【历史对话】\n{history_text}" if long_memory or history_text else ""
 
             full_input = f"{context}\n\n{input_text}" if context else input_text
 
-            # 如果没有 agent（Responses API 模式），直接用带角色的 LLM 回复
             if agent_executor is None:
                 try:
-                    # Responses API 模式：直接用角色人格回复，不需要"客观回复"中间步骤
                     prompt = f"""{system_prompt}
 
 【对话历史】
 {history_text}
 
 【用户当前输入】
-{input_text}"""
+{input_text}
+{output_instruction}"""
 
                     llm_response = persona_llm.invoke(prompt)
                     final_answer = lc_message_to_text(llm_response).strip()
@@ -637,7 +656,6 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
                     print(f"⚠️ LLM 调用失败: {e}")
                     return {"output": "嗯"}
 
-            # 有 agent 的情况：调用工具链
             result = agent_executor.invoke({"messages": [("user", full_input)]})
 
             raw_answer = ""
@@ -661,7 +679,8 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
 【你的初步回复】
 {raw_answer}
 
-请用你的人格和语气重新表达上述回复，保持核心意思不变，但要符合你的角色设定。直接输出最终回复，不要解释。"""
+请用你的人格和语气重新表达上述回复，保持核心意思不变，但要符合你的角色设定。
+{output_instruction}"""
 
                     persona_response = persona_llm.invoke(persona_prompt)
                     final_answer = lc_message_to_text(persona_response).strip()

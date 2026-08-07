@@ -1,12 +1,13 @@
 from dotenv import load_dotenv
 import os
+from pathlib import Path
 
 load_dotenv(dotenv_path="/opt/QQ_BOT/my_env/api_key.env")  # 指定绝对路径
 # 配置参数
 
 # 导入的最近消息数量(这个数量至少为1,否则不引入最新内容)
 # 与 MemoryManager 的 context_window 保持一致，确保完整的上下文
-MESSAGE_COUNT = 20
+MESSAGE_COUNT = 30
 
 # 需要监听的目标用户QQ号
 TARGET_USER_ID = int(os.environ.get("MY_QQ_ID"))
@@ -19,9 +20,6 @@ SELF_USER_ID = int(os.environ.get("BOT_QQ_ID"))
 
 # 随机回复概率
 RAN_REP_PROBABILITY = 5
-
-# 回复表情包概率
-RAN_EMOJI_PROBABILITY = 0
 
 # 图片描述 Prompt（用于 Agent 工具调用场景）
 IMAGE_DESCRIPTION_PROMPT = """你是一个精确的图像分析助手。请详细描述图片内容，重点关注：
@@ -49,15 +47,8 @@ HISTORY_TIMEOUT = 600
 # 控制台指令
 CMD_PREFIX = "/s"
 
-# 表情包池(请自行配置)
-EMOJI_POOL = [
-    "1188FB479104B480ED7CA1B9224309B8.jpg",#
-    "7A434A63B051DDCD5174F137EBFB90EB.jpg",#
-    "248B25A23C7DD88BAF1A64E8143A61A3.jpg",#
-    "D1FBA2328579B32D4CA27027BFF05158.jpg",#
-    "C91C98F552DE51E8E96DD9C372029AA2.jpg",#
-    "46FA0A8C68EC08AF0FDB42456F568C86.jpg"#
-]
+# 本地表情目录。目录中的图片文件名会作为可选项提供给模型。
+EMOJI_ASSET_DIR = Path(os.getenv("EMOJI_ASSET_DIR", "fortune_resources/emoji"))
 
 # 戳一戳池
 POKE = [
@@ -196,7 +187,7 @@ LLM = {
     "FREEGPT": {
         "KEY": os.getenv("FREEGPT"),
         "URL": "https://newapi.pytrio.asia/v1",
-        "NAME": "gpt-5.5,gpt-5.4",
+        "NAME": "gpt-5.6-terra,gpt-5.6-sol,gpt-5.6-luna",
         "USE_RESPONSES_API": True
     },
     "FREEGPT-NONREASONING": {

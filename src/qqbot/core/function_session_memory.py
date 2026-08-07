@@ -115,7 +115,6 @@ class MemoryManager:
                                 text_parts.append("[图片]")
                         elif seg_type == "at":
                             qq = seg_data.get("qq", "")
-                            # 修复问题7：统一类型比较，避免 str vs int 不匹配
                             if str(qq) == str(SELF_USER_ID):
                                 text_parts.append("(系统提示:对方想和你说话)")
                             else:
@@ -150,7 +149,7 @@ class MemoryManager:
         """
         获取会话历史记录
 
-        注意（修复问题8）：
+        返回会话上下文：
         - 当消息数 <= context_window 时，返回原始 session.history（可修改）
         - 当消息数 > context_window 时，返回裁剪后的新对象（只读，修改不会影响原 session）
         - 调用者应只读取返回的历史，不要直接修改
