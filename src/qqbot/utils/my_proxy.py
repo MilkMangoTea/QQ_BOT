@@ -325,6 +325,7 @@ async def ai_completion(session_id, user_content):
 
                         content = lc_message_to_text(content) if not isinstance(content, str) else content
                         content = content.strip() if content else ""
+                        out("🤖 AI 原始回复:", content or "（空）")
 
                         if not content or "Agent stopped due to" in content:
                             content = "嗯"
@@ -366,7 +367,6 @@ async def ai_completion(session_id, user_content):
                 try:
                     if agent_session_id in memory_manager._sessions:
                         del memory_manager._sessions[agent_session_id]
-                        out("🧹 已清理临时描述 session", agent_session_id)
                 except Exception as e:
                     out("⚠️ 清理临时会话失败", e)
 
@@ -567,6 +567,11 @@ async def qq_bot():
 async def _process_message_concurrent(ws, event):
     """处理单条消息，并在需要时发送回复。"""
     try:
+        sender = event.get("sender") or {}
+        sender_id = sender.get("user_id", event.get("user_id"))
+        if str(sender_id) == str(config.SELF_USER_ID):
+            return
+
         user_content = await remember(ws, event)
 
         if not user_content:

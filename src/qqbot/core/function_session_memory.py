@@ -86,6 +86,7 @@ class MemoryManager:
                 message_content = msg.get("message", [])
                 sender = msg.get("sender", {})
                 nickname = sender.get("nickname", "") or sender.get("card", "")
+                is_self_message = str(user_id) == str(SELF_USER_ID)
 
                 # 构建多模态内容列表
                 content_parts = []
@@ -100,6 +101,8 @@ class MemoryManager:
                             text = seg_data.get("text", "")
                             text_parts.append(text)
                         elif seg_type == "image":
+                            if is_self_message:
+                                continue
                             # 转换图片 URL，上传到 Worker 或使用 base64
                             image_url = seg_data.get("url")
                             if image_url:
@@ -129,7 +132,7 @@ class MemoryManager:
                     continue
 
                 # 判断是用户还是机器人
-                if user_id == SELF_USER_ID:
+                if is_self_message:
                     # 机器人的消息只保存文本
                     text_only = "".join(p.get("text", "") for p in content_parts if p.get("type") == "text")
                     if text_only:
