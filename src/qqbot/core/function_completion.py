@@ -196,7 +196,9 @@ def parse_emoji_reply(content, emoji_options):
 
     reply = payload.get("reply")
     emoji = payload.get("emoji")
-    if not isinstance(reply, str) or not reply.strip():
+    if isinstance(reply, str) and not reply.strip():
+        return "嗯喵", emoji if emoji in emoji_options else None
+    if not isinstance(reply, str):
         return text, None
     if emoji not in emoji_options:
         emoji = None
