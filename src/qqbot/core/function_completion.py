@@ -651,7 +651,8 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
                     out("⚠️ LLM 调用失败", e)
                     return {"output": "嗯"}
 
-            result = agent_executor.invoke({"messages": [("user", full_input)]})
+            agent_input = f"{full_input}\n\n{output_instruction}" if output_instruction else full_input
+            result = agent_executor.invoke({"messages": [("user", agent_input)]})
 
             raw_answer = ""
             if isinstance(result, dict) and "messages" in result:
