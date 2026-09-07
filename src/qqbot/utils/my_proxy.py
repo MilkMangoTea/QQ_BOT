@@ -259,6 +259,14 @@ async def ai_completion(session_id, user_content):
             for msg in described_history:
                 temp_session.history.add_message(msg)
 
+            # 同时更新原始会话的最后一条用户消息，替换为包含图片描述的版本
+            original_session = memory_manager.get_or_create_session(session_id)
+            if original_session.history.messages:
+                # 移除最后一条消息（原始的图片消息）
+                original_session.history.messages.pop()
+            # 添加包含描述的消息
+            original_session.history.add_message(HumanMessage(content=combined_text))
+
             agent_session_id = temp_session_id
         else:
             agent_session_id = session_id
