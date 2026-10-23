@@ -29,3 +29,16 @@ build/
 *.sh
 tests/yuri_note.txt
 AGENTS.md
+
+# Python 虚拟环境
+venv/
+my_env/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 环境变量和密钥
+.env
+.env.*
+!.env.example

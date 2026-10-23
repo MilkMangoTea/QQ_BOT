@@ -1,0 +1,75 @@
+[0m[0;4m [0m[0m[0;4m UNIT                                                 [0m[0m[0;4m LOAD  [0m[0m[0;4m ACTIVE[0m[0m[0;4m SUB    [0m[0m[0;4m DESCRIPTION                                                                  [0m
+  aegis.service                                         loaded active running Aegis Service
+  aliyun.service                                        loaded active running Aliyun Assist
+  apparmor.service                                      loaded active exited  Load AppArmor profiles
+  apport.service                                        loaded active exited  LSB: automatic crash report generation
+  AssistDaemon.service                                  loaded active running AssistDaemon
+  atd.service                                           loaded active running Deferred execution scheduler
+  blk-availability.service                              loaded active exited  Availability of block devices
+  chrony.service                                        loaded active running chrony, an NTP client/server
+  cloud-config.service                                  loaded active exited  Apply the settings specified in cloud-config
+  cloud-final.service                                   loaded active exited  Execute cloud user/final scripts
+  cloud-init-local.service                              loaded active exited  Initial cloud-init job (pre-networking)
+  cloud-init.service                                    loaded active exited  Initial cloud-init job (metadata service crawler)
+  console-setup.service                                 loaded active exited  Set console font and keymap
+  containerd.service                                    loaded active running containerd container runtime
+  cron.service                                          loaded active running Regular background program processing daemon
+  dbus.service                                          loaded active running D-Bus System Message Bus
+  docker.service                                        loaded active running Docker Application Container Engine
+  finalrd.service                                       loaded active exited  Create final runtime dir for shutdown pivot root
+  getty@tty1.service                                    loaded active running Getty on tty1
+  kdump-tools.service                                   loaded active exited  Kernel crash dump capture service
+  kexec-load.service                                    loaded active exited  LSB: Load kernel image with kexec
+  kexec.service                                         loaded active exited  LSB: Execute the kexec -e command to reboot system
+  keyboard-setup.service                                loaded active exited  Set the console keyboard layout
+  kmod-static-nodes.service                             loaded active exited  Create List of Static Device Nodes
+  lvm2-monitor.service                                  loaded active exited  Monitoring of LVM2 mirrors, snapshots etc. using dmeventd or progress polling
+  ModemManager.service                                  loaded active running Modem Manager
+  multipathd.service                                    loaded active running Device-Mapper Multipath Device Controller
+  networkd-dispatcher.service                           loaded active running Dispatcher daemon for systemd-networkd
+  packagekit.service                                    loaded active running PackageKit Daemon
+  plymouth-quit-wait.service                            loaded active exited  Hold until boot process finishes up
+  plymouth-quit.service                                 loaded active exited  Terminate Plymouth Boot Screen
+  plymouth-read-write.service                           loaded active exited  Tell Plymouth To Write Out Runtime Data
+  polkit.service                                        loaded active running Authorization Manager
+  qqbot.service                                         loaded active running QQ Bot Python Service
+  resolvconf.service                                    loaded active exited  Nameserver information manager
+  rsyslog.service                                       loaded active running System Logging Service
+  serial-getty@ttyS0.service                            loaded active running Serial Getty on ttyS0
+  setvtrgb.service                                      loaded active exited  Set console scheme
+  snapd.apparmor.service                                loaded active exited  Load AppArmor profiles managed internally by snapd
+  snapd.seeded.service                                  loaded active exited  Wait until snapd is fully seeded
+  snapd.service                                         loaded active running Snap Daemon
+  ssh.service                                           loaded active running OpenBSD Secure Shell server
+  systemd-binfmt.service                                loaded active exited  Set Up Additional Binary Formats
+  systemd-fsck@dev-disk-by\x2duuid-861E\x2dB7CB.service loaded active exited  File System Check on /dev/disk/by-uuid/861E-B7CB
+  systemd-journal-flush.service                         loaded active exited  Flush Journal to Persistent Storage
+  systemd-journald.service                              loaded active running Journal Service
+  systemd-logind.service                                loaded active running User Login Management
+  systemd-modules-load.service                          loaded active exited  Load Kernel Modules
+  systemd-network-generator.service                     loaded active exited  Generate network units from Kernel command line
+  systemd-networkd-wait-online.service                  loaded active exited  Wait for Network to be Configured
+  systemd-networkd.service                              loaded active running Network Configuration
+  systemd-random-seed.service                           loaded active exited  Load/Save Random Seed
+  systemd-remount-fs.service                            loaded active exited  Remount Root and Kernel File Systems
+  systemd-resolved.service                              loaded active running Network Name Resolution
+  systemd-sysctl.service                                loaded active exited  Apply Kernel Variables
+  systemd-sysusers.service                              loaded active exited  Create System Users
+  systemd-tmpfiles-setup-dev.service                    loaded active exited  Create Static Device Nodes in /dev
+  systemd-tmpfiles-setup.service                        loaded active exited  Create Volatile Files and Directories
+  systemd-udev-trigger.service                          loaded active exited  Coldplug All udev Devices
+  systemd-udevd.service                                 loaded active running Rule-based Manager for Device Events and Files
+  systemd-update-utmp.service                           loaded active exited  Record System Boot/Shutdown in UTMP
+  systemd-user-sessions.service                         loaded active exited  Permit User Sessions
+  tuned.service                                         loaded active running Dynamic System Tuning Daemon
+  udisks2.service                                       loaded active running Disk Manager
+  ufw.service                                           loaded active exited  Uncomplicated firewall
+  unattended-upgrades.service                           loaded active running Unattended Upgrades Shutdown
+  user-runtime-dir@0.service                            loaded active exited  User Runtime Directory /run/user/0
+  user@0.service                                        loaded active running User Manager for UID 0
+
+LOAD   = Reflects whether the unit definition was properly loaded.
+ACTIVE = The high-level unit activation state, i.e. generalization of SUB.
+SUB    = The low-level unit activation state, values depend on unit type.
+[0;1;39m68 loaded units listed.[0m Pass --all to see loaded but inactive units, too.
+To show all installed unit files use 'systemctl list-unit-files'.
