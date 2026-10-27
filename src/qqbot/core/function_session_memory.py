@@ -242,7 +242,12 @@ class MemoryManager:
     # 检查会话是否已初始化
     def is_session_initialized(self, session_id: str) -> bool:
         session = self._sessions.get(session_id)
-        return session is not None and session.is_initialized
+        # 过期会话也需要重新拉取历史；检查时不 touch，避免延长旧会话寿命。
+        return (
+            session is not None
+            and session.is_initialized
+            and not session.is_expired(self._timeout)
+        )
 
     # 检查最近是否有主动回复（用于冷却）
     def recent_bot_proactive_reply(self, session_id: str, within_seconds: float = 300) -> bool:
