@@ -3,7 +3,8 @@ tests/test.py
 NapCatInstaller.app
 requirements
 .venv
-/tests/
+/tests/*
+!/tests/test_deepseek_search.py
 
 # Python
 __pycache__/

@@ -161,6 +161,40 @@ LLM = {
 
 **多模型降级**：在 `NAME` 字段用逗号分隔多个模型名，失败时自动尝试下一个。
 
+### 联网搜索
+
+配置现有的 `DEEPSEEK` 环境变量后，支持工具调用的聊天模型会自动获得 `deepseek_search`。
+它通过独立的 DeepSeek Search REST API 查询网页，因此主聊天模型也可以是其他提供商。
+这是按次收费的接口，具体计费以 DeepSeek 官方文档为准。
+
+搜索参数统一位于 `src/qqbot/config/config.py` 的 `DEEPSEEK_SEARCH_CONFIG`：
+
+```python
+DEEPSEEK_SEARCH_CONFIG = {
+    "ENABLED": True,        # 默认启用，也可通过下方环境变量关闭
+    "KEY": LLM["DEEPSEEK"]["KEY"],
+    "URL": "https://api.deepseek.com/v1/tools/search",
+    "TIMEOUT": 15.0,       # 网络请求超时（秒）
+    "RESULT_COUNT": 5,     # 返回结果数，接口允许 1 至 50
+}
+```
+
+在 `my_env/api_key.env` 中设置 `DEEPSEEK_SEARCH_ENABLED=false` 可关闭搜索；修改配置后重启机器人。
+没有配置 DeepSeek 密钥时不注册搜索工具，不影响其他聊天模型。
+当前 `USE_RESPONSES_API=True` 分支仍沿用原有的无工具模式，不提供联网搜索。
+
+提示词要求模型在用户明确要求搜索、查证，或询问最新新闻、版本、价格、政策等时搜索；
+常识、闲聊和主观选择不主动搜索。默认只取摘要，不拉取网页全文；通常查询一次，证据不足时才补搜一次。
+查询只发送必要关键词，不发送整段聊天记录或私人信息。搜索内容仅作为外部资料，不能覆盖系统规则。
+最终回复与人格改写均需保留关键来源的标题和原始 URL；搜索失败或证据不足时须如实说明。
+来源保留等行为由提示词约束，不能替代模型输出的人工核对。
+
+离线验证（mock HTTP 与 LLM，不消耗 API 额度）：
+
+```bash
+python tests/test_deepseek_search.py
+```
+
 ### 行为配置
 
 ```python
