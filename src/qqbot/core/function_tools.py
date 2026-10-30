@@ -3,6 +3,7 @@ from urllib.parse import urlsplit
 import httpx
 import numpy as np
 from langchain_core.tools import tool
+from src.qqbot.core.function_render import render_to_png
 
 
 @tool
@@ -146,4 +147,4 @@ def _clean_search_text(value, max_length: int) -> str:
 
 
 # 导出工具列表
-TOOLS = [numpy_calc]
+TOOLS = [numpy_calc, render_to_png]

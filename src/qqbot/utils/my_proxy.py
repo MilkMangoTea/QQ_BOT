@@ -29,6 +29,7 @@ from src.qqbot.core.function_fortune import setup_daily_fortune_scheduler
 from src.qqbot.core.function_long_turn_memory import LocalDictStore
 from src.qqbot.core.function_session_memory import MemoryManager, calc_session_id
 from src.qqbot.core.function_tools import TOOLS
+from src.qqbot.core.function_render import build_rendered_image_segments
 from src.qqbot.utils.console import out
 
 CURRENT_LLM = config.LLM[config.CURRENT_COMPLETION]
@@ -328,8 +329,10 @@ async def ai_completion(session_id, user_content):
 
                         if isinstance(response, dict):
                             content = response.get("output", "")
+                            rendered_ids = response.get("rendered_image_ids", [])
                         else:
                             content = response.content if hasattr(response, 'content') else str(response)
+                            rendered_ids = []
 
                         content = lc_message_to_text(content) if not isinstance(content, str) else content
                         content = content.strip() if content else ""
@@ -358,7 +361,11 @@ async def ai_completion(session_id, user_content):
                         _BACKGROUND_TASKS.add(task)
                         task.add_done_callback(_BACKGROUND_TASKS.discard)
 
-                        return {"text": content, "emoji": emoji_name}
+                        return {
+                            "text": content,
+                            "emoji": emoji_name,
+                            "rendered_image_ids": rendered_ids,
+                        }
 
                     except Exception as e:
                         last_err = e
@@ -495,14 +502,22 @@ async def handle_message(websocket, event, user_content):
         if isinstance(completion, dict):
             content = completion.get("text", "")
             emoji_name = completion.get("emoji")
+            rendered_ids = completion.get("rendered_image_ids", [])
         else:
             content = completion
             emoji_name = None
+            rendered_ids = []
 
-        if not content:
+        if not content and not rendered_ids:
             return
 
-        await send_message(websocket, build_params("text", event, content))
+        message_segments = []
+        if content:
+            message_segments.append({"type": "text", "data": {"text": content}})
+
+        message_segments.extend(await build_rendered_image_segments(rendered_ids))
+        if message_segments:
+            await send_message(websocket, build_params("segments", event, message_segments))
 
         memory_manager.add_ai_message(session_id, content)
         out("💾 AI 回复已加入上下文:", content[:80])

@@ -5,6 +5,7 @@ requirements
 .venv
 /tests/*
 !/tests/test_deepseek_search.py
+!/tests/test_content_renderer.py
 
 # Python
 __pycache__/

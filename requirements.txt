@@ -42,3 +42,5 @@ asyncio
 pillow
 apscheduler
 numpy
+cairosvg
+matplotlib
