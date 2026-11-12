@@ -1,9 +1,12 @@
 import html
 import json
+import logging
 import re
 import subprocess
 import sys
+import tempfile
 import time
+import traceback
 import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -53,6 +56,10 @@ def render_content_png(content: str, content_format: str, output_dir: Path):
         except subprocess.TimeoutExpired:
             raise ValueError("渲染超时，请简化内容后重试") from None
         if result.returncode:
+            logging.getLogger(__name__).error(
+                "渲染子进程失败：format=%s, exit=%s\n%s",
+                content_format, result.returncode, result.stderr.strip(),
+            )
             try:
                 error = json.loads(result.stdout)["error"]
             except (ValueError, KeyError):
@@ -395,13 +402,53 @@ def _reject_svg_resource(url, resource_type):
     raise ValueError("SVG 不允许读取外部资源")
 
 
+def _render_error_message(error):
+    if isinstance(error, ModuleNotFoundError):
+        return (
+            f"缺少 Python 模块：{error.name}。"
+            "请使用运行机器人的 Python 安装 requirements.txt。"
+        )
+    if isinstance(error, (ImportError, OSError)) and "cairo" in str(error).lower():
+        return "Cairo 本地库加载失败。Linux 服务器需安装 libcairo2；这不是网络错误。"
+    if isinstance(error, PermissionError):
+        return "渲染输出目录不可写，请检查机器人进程的目录权限。"
+    if isinstance(error, ValueError):
+        return str(error)
+    return f"渲染异常：{type(error).__name__}，具体原因已记录服务器日志。"
+
+
+def check_renderers(output_dir):
+    """Check the same subprocesses and output permissions used by the bot, offline."""
+    print(f"Python: {sys.executable}")
+    print(f"Output: {output_dir.resolve()}")
+    samples = {
+        "svg": '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><rect width="100" height="50" fill="#0284c7"/></svg>',
+        "latex": r"\frac{1}{2}",
+        "markdown": "# 渲染自检\n\n- 中文与 English\n\n```\nprint('hello')\n```",
+    }
+    failed = False
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="render_check_", dir=output_dir) as temp_dir:
+        for content_format, content in samples.items():
+            try:
+                _, path = render_content_png(content, content_format, Path(temp_dir))
+                with Image.open(path) as image:
+                    print(f"{content_format}: OK ({image.width}x{image.height} PNG)")
+            except Exception as error:
+                failed = True
+                print(f"{content_format}: FAIL - {_render_error_message(error)}")
+    return 1 if failed else 0
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--check":
+        sys.exit(check_renderers(Path("fortune_resources/out")))
     try:
         request = json.load(sys.stdin)
         renderers = {"latex": _render_latex, "svg": _render_svg,
                      "md": _render_markdown, "markdown": _render_markdown}
         renderers[request["format"]](request["content"], Path(request["output_path"]))
     except Exception as error:
-        message = str(error) if isinstance(error, ValueError) else "渲染失败，请检查输入和渲染依赖"
-        print(json.dumps({"error": message}))
+        traceback.print_exc(file=sys.stderr)
+        print(json.dumps({"error": _render_error_message(error)}))
         sys.exit(1)

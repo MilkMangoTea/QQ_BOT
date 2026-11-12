@@ -3,9 +3,9 @@ tests/test.py
 NapCatInstaller.app
 requirements
 .venv
+# Local debugging scripts and offline checks
+/scripts/prompt_playground.py
 /tests/*
-!/tests/test_deepseek_search.py
-!/tests/test_content_renderer.py
 
 # Python
 __pycache__/

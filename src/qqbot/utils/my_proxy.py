@@ -305,8 +305,7 @@ async def ai_completion(session_id, user_content):
                         emoji_options = get_available_emojis()
                         try:
                             response = await asyncio.wait_for(
-                                asyncio.to_thread(
-                                    chain.invoke,
+                                chain.ainvoke(
                                     {
                                         "input": [input_msg],
                                         "long_memory": long_mem,
@@ -314,18 +313,14 @@ async def ai_completion(session_id, user_content):
                                     },
                                     run_config={"configurable": {"session_id": agent_session_id}}
                                 ),
-                                timeout=60.0
+                                timeout=config.AGENT_CONFIG["TURN_TIMEOUT"]
                             )
                         except asyncio.TimeoutError as timeout_err:
                             last_err = timeout_err
-                            retry_count += 1
-                            if retry_count <= max_retries:
-                                out("⏱️ 模型超时，准备重试", f"{model_name}，第 {retry_count} 次")
-                                await asyncio.sleep(1)  # 短暂延迟后重试
-                                continue
-                            else:
-                                out("⏱️ 模型超时，尝试下一个模型", model_name)
-                                break
+                            # Cancel the async graph rather than restarting all searches
+                            # while the previous synchronous chain is still running.
+                            out("⏱️ 本轮 Agent 已超时取消，不重做整轮工具调用", model_name)
+                            return "这次没来得及处理完。"
 
                         if isinstance(response, dict):
                             content = response.get("output", "")
