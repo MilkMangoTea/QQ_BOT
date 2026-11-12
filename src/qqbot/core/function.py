@@ -7,8 +7,9 @@ from src.qqbot.core.function_completion import (
     should_reply_langchain,
 )
 from src.qqbot.core.function_session_memory import calc_session_id
+from src.qqbot.core.function_message import QQMessageParser, event_message, normalize_message
 from src.qqbot.utils.console import out
-from src.qqbot.utils.image_uploader import get_image_url_or_fallback
+from src.qqbot.utils.image_uploader import get_image_url_or_fallback, to_onebot_image_file
 
 # 随机文字池子
 def ran_rep_text_only():
@@ -30,19 +31,25 @@ def ran_rep():
 
 # @回复
 def be_atted(event):
-    message = event.get("message")
+    message = normalize_message(event_message(event))
     for log in message:
-        if log["type"] == "at" and log["data"]["qq"] == str(config.SELF_USER_ID):
+        if log.get("type") == "at" and str((log.get("data") or {}).get("qq")) == str(config.SELF_USER_ID):
             return True
     return False
 
 
 # 条件回复(随机回复，被@，管理员发言，私聊)
+def is_allowed_group(event):
+    return (event.get("message_type") != "group"
+            or str(event.get("group_id")) in {str(group_id) for group_id in config.ALLOWED_GROUPS})
+
+
 def rep(event, memory_manager):
-    if event.get("message_type") == "group" and event.get("group_id") not in config.ALLOWED_GROUPS:
+    if not is_allowed_group(event):
         return False
 
-    if ran_rep() or be_atted(event) or event.get("message_type") == "private":
+    if (ran_rep() or be_atted(event) or event.get("_reply_to_bot") is True
+            or event.get("message_type") == "private"):
         return True
 
     # 自然语言识别模块已关闭
@@ -82,8 +89,8 @@ async def build_emoji_params(event, emoji_name):
         out("⚠️ 表情文件不存在", emoji_path)
         return None
 
-    image_file = await get_image_url_or_fallback(emoji_path.read_bytes())
-    return build_params("image", event, image_file)
+    image_file = to_onebot_image_file(await get_image_url_or_fallback(emoji_path.read_bytes()))
+    return build_params("image", event, image_file) if image_file else None
 
 
 # 导入最近聊天消息
@@ -112,68 +119,10 @@ async def get_nearby_message(websocket, event, llm):
         out("⚠️ 获取群聊消息失败", e)
         return []
 
-# 处理一条 CQ 消息，生成可直接塞进 handle_pool 的列表
-async def process_single_message(message, nickname, llm):
-    results = []
-    if not message or not isinstance(message, list):
-        out("⚠️ message 无效或为空", 400)
-        return []
-
-    # 拼文本
-    name = nickname or ""
-    at_prompt = ""   # 专门存放 @ 生成的提示（昵称和冒号之间）
-    text_body = ""   # 普通文字都拼到这里
-
-    for log in message:
-        log_type = log.get("type")
-        data = log.get("data", {})
-        # 文本
-        if log_type == "text":
-            txt = data.get("text") or ""
-            if txt:
-                text_body += txt
-        # @
-        elif log_type == "at":
-            qq = int(data.get("qq", 0))
-
-            if qq == config.SELF_USER_ID:
-                target_prompt = "(系统提示:对方想和你说话)"
-            else:
-                target_prompt = "(系统提示:对方在和其他人说话)"
-            # 放到昵称和冒号之间
-            at_prompt += target_prompt
-        # 图片
-        elif log_type == "image":
-            image_url = await get_image_url_or_fallback(data.get("url"))
-            if image_url:
-                results.append({
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": image_url}
-                        }
-                    ]
-                })
-            else:
-                results.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "text",
-                        "text": "(系统提示: 图片获取失败)"
-                    }]
-                })
-
-    if text_body or at_prompt:
-        # 昵称 + at 提示 + 冒号 + 文本
-        temp_msg = f"{name}{at_prompt}:{text_body}"
-        if temp_msg != name + ":":
-            results.append({
-                "role": "user",
-                "content": [{
-                    "type": "text",
-                    "text": temp_msg
-                }]
-            })
-
-    return results
+# Keep live and historical message interpretation in one parser.
+async def process_single_message(message, nickname, llm, *, parser=None, event=None):
+    parser = parser or QQMessageParser(config.SELF_USER_ID)
+    content = await parser.parse(message, nickname, origin=event)
+    if event is not None:
+        event["_reply_to_bot"] = parser.reply_to_bot
+    return [{"role": "user", "content": content}] if content else []

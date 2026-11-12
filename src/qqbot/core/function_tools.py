@@ -1,9 +1,71 @@
+import ast
 from urllib.parse import urlsplit
 
 import httpx
 import numpy as np
 from langchain_core.tools import tool
 from src.qqbot.core.function_render import render_to_png
+
+
+_NUMPY_FUNCTIONS = frozenset("""
+array asarray arange linspace logspace geomspace zeros ones full eye identity diag
+reshape transpose concatenate stack vstack hstack column_stack row_stack
+dot matmul inner outer cross tensordot einsum trace sum prod cumsum cumprod
+mean median std var min max amin amax argmin argmax percentile quantile average
+abs absolute fabs sign real imag conj conjugate sqrt cbrt square power exp exp2
+expm1 log log2 log10 log1p sin cos tan arcsin arccos arctan arctan2 hypot
+sinh cosh tanh arcsinh arccosh arctanh deg2rad rad2deg degrees radians
+floor ceil trunc round around rint clip maximum minimum where diff gradient
+trapezoid trapz polyfit polyval roots sort argsort unique count_nonzero all any
+isclose allclose isnan isinf isfinite add subtract multiply divide floor_divide
+remainder mod fmod gcd lcm float32 float64 int32 int64 complex64 complex128
+linalg.inv linalg.pinv linalg.det linalg.slogdet linalg.solve linalg.lstsq
+linalg.eig linalg.eigh linalg.eigvals linalg.eigvalsh linalg.svd linalg.norm
+linalg.matrix_rank linalg.matrix_power linalg.cholesky linalg.qr linalg.cond
+""".split())
+_NUMPY_VALUES = _NUMPY_FUNCTIONS | {"pi", "e", "inf", "nan", "newaxis", "linalg"}
+_NUMPY_AST_TYPES = (
+    ast.Expression, ast.Call, ast.Name, ast.Attribute, ast.Load, ast.Constant,
+    ast.List, ast.Tuple, ast.Subscript, ast.Slice, ast.keyword, ast.BinOp,
+    ast.UnaryOp, ast.Compare, ast.BoolOp, ast.IfExp, ast.operator,
+    ast.unaryop, ast.cmpop, ast.boolop,
+)
+
+
+def _numpy_path(node):
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name) and node.id in {"np", "numpy"}:
+        return ".".join(reversed(parts))
+    return None
+
+
+def _validate_numpy_expression(expression):
+    """Allow numeric expressions without exposing NumPy I/O or Python internals."""
+    if not isinstance(expression, str) or len(expression) > 4000:
+        raise ValueError("计算表达式必须是 4000 字符以内的字符串")
+    tree = ast.parse(expression, mode="eval")
+    nodes = list(ast.walk(tree))
+    if len(nodes) > 1000:
+        raise ValueError("计算表达式过于复杂")
+    for node in nodes:
+        if not isinstance(node, _NUMPY_AST_TYPES):
+            raise ValueError("仅支持数学表达式、数组和 NumPy 计算函数")
+        if isinstance(node, ast.Name) and node.id not in {"np", "numpy"}:
+            raise ValueError("仅允许使用 np 或 numpy 计算函数")
+        if isinstance(node, ast.Call) and _numpy_path(node.func) not in _NUMPY_FUNCTIONS:
+            raise ValueError("不支持该计算函数，禁止文件读写和任意代码调用")
+        if isinstance(node, ast.Attribute):
+            path = _numpy_path(node)
+            if path not in _NUMPY_VALUES and not (
+                path is None and node.attr in {"T", "real", "imag", "shape", "ndim", "size"}
+            ):
+                raise ValueError("不支持该属性，禁止访问模块内部对象")
+        if isinstance(node, ast.keyword) and node.arg is None:
+            raise ValueError("不支持展开调用参数")
+    return tree
 
 
 @tool
@@ -21,13 +83,15 @@ def numpy_calc(expression: str) -> str:
     """
     try:
         # 自动更新弃用的 numpy 函数
-        expression = expression.replace("np.trapz", "np.trapezoid").replace("numpy.trapz", "numpy.trapezoid")
+        if hasattr(np, "trapezoid"):
+            expression = expression.replace("np.trapz", "np.trapezoid").replace("numpy.trapz", "numpy.trapezoid")
 
+        tree = _validate_numpy_expression(expression)
         safe_namespace = {
             "np": np,
             "numpy": np,
         }
-        result = eval(expression, {"__builtins__": {}}, safe_namespace)
+        result = eval(compile(tree, "<numpy_calc>", "eval"), {"__builtins__": {}}, safe_namespace)
 
         if isinstance(result, np.ndarray):
             return f"计算结果：\n{result}\n形状：{result.shape}"

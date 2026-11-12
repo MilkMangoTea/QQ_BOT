@@ -11,6 +11,17 @@ from src.qqbot.utils.console import out
 # 避免重复上传同一张图片（特别是历史消息中的图片）
 _url_upload_cache = {}
 
+
+def to_onebot_image_file(source):
+    """Convert model-style data URIs to OneBot's base64:// image format."""
+    if not isinstance(source, str) or not source or source == "base64://error":
+        return None
+    if source.startswith("data:image/"):
+        header, separator, encoded = source.partition(",")
+        return f"base64://{encoded}" if separator and header.endswith(";base64") and encoded else None
+    return source
+
+
 async def upload_image_bytes_to_worker(
     image_data: bytes,
     filename: Optional[str] = None

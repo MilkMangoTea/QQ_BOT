@@ -20,7 +20,7 @@ def build_params(message_kind, event, content):
         base = {"message": [{"type": "text", "data": {"text": content}}]}
     elif message_kind == "image":
         base = {
-            "message": [{"type": "image", "data": {"file": content, "sub_type": 1, "summary": "[色禽图片]"}}]}
+            "message": [{"type": "image", "data": {"file": content, "sub_type": 1, "summary": "[表情]"}}]}
     elif message_kind == "segments":
         base = {"message": content}
     key = "user_id" if msg_type == "private" else "group_id"
@@ -189,23 +189,25 @@ emoji 只能为 null 或以下列表中的一个完整值：{choices}。
 
 
 def parse_emoji_reply(content, emoji_options):
-    """解析模型输出；格式不符合要求时保留原始文本且不发送表情。"""
+    """解析已验收的回复，不将协议对象或空回复替换成新的正文。"""
     text = lc_message_to_text(content).strip()
-    match = re.search(r"\{.*\}", text, re.S)
-    if not match:
-        return text, None
-
+    if text.startswith(("```json\n", "```\n")) and text.endswith("```"):
+        text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
     try:
-        payload = json.loads(match.group(0))
+        payload = json.loads(text)
     except json.JSONDecodeError:
+        if text.startswith(("{", "[", "```json")):
+            raise ValueError("回复 JSON 格式无效") from None
+        # A normal, approved natural-language answer remains usable as-is.
         return text, None
-
+    if isinstance(payload, list):
+        raise ValueError("回复 JSON 必须是包含 reply 的对象")
+    if not isinstance(payload, dict):
+        return text, None
     reply = payload.get("reply")
     emoji = payload.get("emoji")
-    if isinstance(reply, str) and not reply.strip():
-        return "嗯喵", emoji if emoji in emoji_options else None
     if not isinstance(reply, str):
-        return text, None
+        raise ValueError("回复 JSON 缺少有效的 reply 字符串")
     if emoji not in emoji_options:
         emoji = None
     return reply.strip(), emoji
@@ -636,7 +638,10 @@ def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prom
         async def _run(self, inputs, run_config, async_mode):
             run_config = run_config if isinstance(run_config, dict) else {}
             session_id = run_config.get("configurable", {}).get("session_id")
-            history_msgs = list(memory_manager.get_history(session_id).messages) if session_id else []
+            if "history" in inputs:
+                history_msgs = list(inputs["history"])
+            else:
+                history_msgs = list(memory_manager.get_history(session_id).messages) if session_id else []
             input_msgs = inputs.get("input", [])
             input_text = "\n".join(lc_message_to_text(msg) for msg in input_msgs)
             # Preserve dialogue roles; the current message may already be stored by the receiver.

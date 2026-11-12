@@ -6,8 +6,8 @@ from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import AIMessage, HumanMessage
 from src.qqbot.config.config import SELF_USER_ID
+from src.qqbot.core.function_message import QQMessageParser, event_message, sender_id, sender_name
 from src.qqbot.utils.console import out
-from src.qqbot.utils.image_uploader import get_image_url_or_fallback
 
 
 @dataclass
@@ -17,6 +17,7 @@ class SessionMemory:
     last_update_time: float = field(default_factory=time.time)
     last_proactive_reply_time: float = 0.0  # 上次主动插话的时间
     is_initialized: bool = False
+    source_messages: Dict[str, Dict] = field(default_factory=dict)
 
     def touch(self) -> None:
         self.last_update_time = time.time()
@@ -68,7 +69,9 @@ class MemoryManager:
             self,
             session_id: str,
             messages: List[Dict],
-            force: bool = False
+            force: bool = False,
+            parser=None,
+            event_context=None,
     ) -> None:
         session = self.get_or_create_session(session_id)
 
@@ -78,55 +81,30 @@ class MemoryManager:
 
         # 清空现有历史
         session.history.clear()
+        parser = parser or QQMessageParser(
+            SELF_USER_ID, quote_chars=500,
+            lookup=lambda message_id, seq: self.get_source_message(session_id, message_id, seq))
+        for msg in messages[-self._context_window:]:
+            self.cache_message(session_id, msg)
+        conversation = {}
+        if session_id.startswith("group:"):
+            conversation = {"message_type": "group", "group_id": session_id.split(":", 1)[1]}
+        elif session_id.startswith("user:"):
+            conversation = {"message_type": "private", "user_id": session_id.split(":", 1)[1]}
+        if event_context:
+            for key in ("message_type", "group_id", "user_id"):
+                if key in event_context:
+                    conversation[key] = event_context[key]
 
         # 填充历史消息
         for msg in messages[-self._context_window:]:
             try:
-                user_id = msg.get("user_id")
-                message_content = msg.get("message", [])
-                sender = msg.get("sender", {})
-                nickname = sender.get("nickname", "") or sender.get("card", "")
-                is_self_message = str(user_id) == str(SELF_USER_ID)
-
-                # 构建多模态内容列表
-                content_parts = []
-                text_parts = []  # 用于拼接文本
-
-                for segment in message_content:
-                    if isinstance(segment, dict):
-                        seg_type = segment.get("type")
-                        seg_data = segment.get("data", {})
-
-                        if seg_type == "text":
-                            text = seg_data.get("text", "")
-                            text_parts.append(text)
-                        elif seg_type == "image":
-                            if is_self_message:
-                                continue
-                            # 转换图片 URL，上传到 Worker 或使用 base64
-                            image_url = seg_data.get("url")
-                            if image_url:
-                                image_final_url = await get_image_url_or_fallback(image_url)
-                                if image_final_url:
-                                    content_parts.append({
-                                        "type": "image_url",
-                                        "image_url": {"url": image_final_url}
-                                    })
-                                else:
-                                    text_parts.append("[图片获取失败]")
-                            else:
-                                text_parts.append("[图片]")
-                        elif seg_type == "at":
-                            qq = seg_data.get("qq", "")
-                            if str(qq) == str(SELF_USER_ID):
-                                text_parts.append("(系统提示:对方想和你说话)")
-                            else:
-                                text_parts.append("(系统提示:对方在和其他人说话)")
-
-                # 拼接文本部分
-                if text_parts:
-                    full_text = f"{nickname}:{''.join(text_parts)}"
-                    content_parts.insert(0, {"type": "text", "text": full_text})
+                is_self_message = str(sender_id(msg)) == str(SELF_USER_ID)
+                content_parts = await parser.parse(
+                    event_message(msg), sender_name(msg),
+                    origin={**msg, **conversation},
+                    include_name=not is_self_message, allow_images=not is_self_message,
+                )
 
                 if not content_parts:
                     continue
@@ -147,6 +125,31 @@ class MemoryManager:
 
         session.is_initialized = True
         out("✅ 会话历史已初始化", f"{session_id}，加载 {len(session.history.messages)} 条")
+
+    def cache_message(self, session_id, event):
+        """Keep a bounded, per-conversation cache for reply IDs and sequences."""
+        if not isinstance(event, dict):
+            return
+        message_id = event.get("message_id")
+        seq = event.get("message_seq", event.get("seq"))
+        if message_id is None and seq is None:
+            return
+        key = f"id:{message_id}" if message_id is not None else f"seq:{seq}"
+        source = self.get_or_create_session(session_id).source_messages
+        source.pop(key, None)
+        source[key] = event
+        while len(source) > max(30, self._context_window * 3):
+            source.pop(next(iter(source)))
+
+    def get_source_message(self, session_id, message_id=None, seq=None):
+        session = self._sessions.get(session_id)
+        if session is None or session.is_expired(self._timeout):
+            return None
+        if seq is not None:
+            for event in reversed(list(session.source_messages.values())):
+                if str(event.get("message_seq", event.get("seq"))) == str(seq):
+                    return event
+        return session.source_messages.get(f"id:{message_id}") if message_id is not None else None
 
     def get_history(self, session_id: str) -> BaseChatMessageHistory:
         """

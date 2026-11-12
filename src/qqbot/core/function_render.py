@@ -9,7 +9,7 @@ from src.qqbot.utils.content_renderer import (
     get_rendered_image_path,
     render_content_png,
 )
-from src.qqbot.utils.image_uploader import get_image_url_or_fallback
+from src.qqbot.utils.image_uploader import get_image_url_or_fallback, to_onebot_image_file
 
 
 @tool("render_to_png", response_format="content_and_artifact")
@@ -50,6 +50,16 @@ def rendered_image_ids(messages):
     return collect_rendered_image_ids(messages)
 
 
+def cleanup_rendered_images(image_ids):
+    for image_id in image_ids:
+        path = rendered_image_path(image_id)
+        if path is not None:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as error:
+                out("⚠️ 清理未发送的渲染图片失败", error)
+
+
 async def build_rendered_image_segments(image_ids):
     """Prepare OneBot image segments; only generated files are eligible for cleanup."""
     paths = [rendered_image_path(image_id) for image_id in image_ids]
@@ -61,11 +71,8 @@ async def build_rendered_image_segments(image_ids):
                 if not path.is_file():
                     out("⚠️ 渲染图片文件不存在", path.name)
                     continue
-                image_file = await get_image_url_or_fallback(path)
-                if isinstance(image_file, str) and image_file.startswith("data:image/"):
-                    header, separator, encoded = image_file.partition(",")
-                    image_file = f"base64://{encoded}" if separator and header.endswith(";base64") and encoded else None
-                if image_file and image_file != "base64://error":
+                image_file = to_onebot_image_file(await get_image_url_or_fallback(path))
+                if image_file:
                     segments.append({"type": "image", "data": {"file": image_file}})
             except Exception as error:
                 out("⚠️ 准备渲染图片失败", error)

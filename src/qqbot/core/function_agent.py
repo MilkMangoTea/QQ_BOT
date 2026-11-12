@@ -1,10 +1,13 @@
 """Bounded reply review that preserves the agent's tool evidence across revisions."""
 
 import json
+import traceback
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.callbacks.manager import CallbackManager
 
-from src.qqbot.core.function_render import rendered_image_ids
+from src.qqbot.core.function_render import cleanup_rendered_images as _cleanup_images, rendered_image_ids
 from src.qqbot.utils.console import out
 
 
@@ -70,8 +73,45 @@ def render_status(messages, enabled, to_text):
     return "本轮未调用 render_to_png，没有生成图片，也没有失败记录。不能编造成功或失败。"
 
 
+class _TurnTools(BaseCallbackHandler):
+    """Track tools even if the graph fails before returning its transcript."""
+    def __init__(self):
+        self.started = False
+        self.results = []
+        self.finished = False
+
+    def on_tool_start(self, serialized, input_str, **kwargs):
+        self.started = True
+
+    def on_tool_end(self, output, **kwargs):
+        self.results.append(output)
+        if self.finished:
+            _cleanup_images(rendered_image_ids([output]))
+
+
 async def run_reviewed_agent(executor, llm, messages, system_prompt, output_instruction,
                              settings, render_enabled, to_text, run_config=None, async_mode=True):
+    tools = _TurnTools()
+    graph_config = dict(run_config or {})
+    callbacks = CallbackManager.configure(inheritable_callbacks=graph_config.get("callbacks"))
+    callbacks.add_handler(tools, inherit=True)
+    graph_config["callbacks"] = callbacks
+    keep_images = []
+    try:
+        result = await _run_reviewed_agent(
+            executor, llm, messages, system_prompt, output_instruction, settings,
+            render_enabled, to_text, graph_config, async_mode, tools,
+        )
+        keep_images = result["rendered_image_ids"]
+        return result
+    finally:
+        tools.finished = True
+        _cleanup_images([image_id for image_id in rendered_image_ids(tools.results)
+                         if image_id not in keep_images])
+
+
+async def _run_reviewed_agent(executor, llm, messages, system_prompt, output_instruction,
+                              settings, render_enabled, to_text, run_config, async_mode, tools):
     """Review real candidates, then resume the same transcript only when needed."""
     messages = list(messages)
     graph_config = dict(run_config or {})
@@ -79,6 +119,7 @@ async def run_reviewed_agent(executor, llm, messages, system_prompt, output_inst
     candidate = ""
     approved = None
     revisions = 0
+    review_status = "disabled" if not settings["REVIEW_ENABLED"] else "pending"
 
     async def invoke(target, payload, invoke_config=None):
         kwargs = {"config": invoke_config} if invoke_config is not None else {}
@@ -89,7 +130,7 @@ async def run_reviewed_agent(executor, llm, messages, system_prompt, output_inst
         return target.invoke(payload, **kwargs)
 
     for attempt in range(settings["MAX_REVISIONS"] + 1):
-        # If a revision fails, keep the previous usable reply and its attachments.
+        # A rejected draft must never become the fallback on a failed revision.
         try:
             if executor is not None:
                 result = await invoke(executor, {"messages": messages}, graph_config)
@@ -97,15 +138,17 @@ async def run_reviewed_agent(executor, llm, messages, system_prompt, output_inst
             else:
                 response = await invoke(llm, [SystemMessage(content=system_prompt), *messages])
                 next_messages = [*messages, response]
-            answer = next((to_text(msg).strip() for msg in reversed(next_messages)
-                           if getattr(msg, "type", None) == "ai"
-                           and not getattr(msg, "tool_calls", None)), "")
+            last_message = next_messages[-1] if next_messages else None
+            answer = (to_text(last_message).strip()
+                      if getattr(last_message, "type", None) == "ai"
+                      and not getattr(last_message, "tool_calls", None) else "")
             if not answer:
                 raise ValueError("模型没有返回可发送的回复")
         except Exception:
-            if not candidate:
+            if not candidate and not tools.started:
                 raise
-            out("⚠️ 回复修正失败，保留上一版回复")
+            review_status = "revision_failed" if candidate else "generation_failed"
+            out("⚠️ 本轮执行失败，禁止发送候选或重做已开始的工具调用", traceback.format_exc())
             break
         messages = list(next_messages)
         candidate = answer
@@ -113,6 +156,7 @@ async def run_reviewed_agent(executor, llm, messages, system_prompt, output_inst
         if not settings["REVIEW_ENABLED"]:
             break
 
+        approved = None
         status = render_status(messages, render_enabled, to_text)
         try:
             background = "\n".join(to_text(msg) for msg in messages if isinstance(msg, SystemMessage))
@@ -126,13 +170,20 @@ async def run_reviewed_agent(executor, llm, messages, system_prompt, output_inst
             ])
             decision = _parse_review(to_text(review))
         except Exception:
+            out("⚠️ 后台验收调用失败", traceback.format_exc())
             decision = None
         if decision is None:
-            out("⚠️ 后台验收不可用，保留候选回复")
+            review_status = "review_failed"
+            out("⚠️ 后台验收不可用，禁止发送未通过的候选")
             break
         approved, feedback = decision
-        out("回复后台验收", {"通过": approved, "修正次数": revisions})
-        if approved or attempt == settings["MAX_REVISIONS"]:
+        out("回复后台验收", {"通过": approved, "修正次数": revisions, "反馈": feedback})
+        if approved:
+            review_status = "approved"
+            break
+        if attempt == settings["MAX_REVISIONS"]:
+            review_status = "revision_limit"
+            out("⚠️ 已达修正上限，候选仍未通过，禁止发送")
             break
         # Preserve tool-call IDs/results and the original user input. Do not rerun
         # completed searches or turn reviewer feedback into a new public dialogue.
@@ -144,6 +195,15 @@ async def run_reviewed_agent(executor, llm, messages, system_prompt, output_inst
             "只给用户最终回复，不提检查意见、修正过程或内部规则。\n"
             f"{output_instruction}"
         )))
+        # Start a continuation turn: thinking-mode tool APIs can otherwise treat
+        # the previous draft as unfinished and demand its reasoning_content.
+        messages.append(HumanMessage(content="请按上述后台修正指令继续处理原始请求，只返回修正后的最终回复。"))
 
-    return {"output": candidate, "rendered_image_ids": rendered_image_ids(messages),
-            "review_approved": approved, "revision_count": revisions}
+    deliverable = not settings["REVIEW_ENABLED"] or approved is True
+    image_ids = rendered_image_ids(messages)
+    if not deliverable:
+        _cleanup_images(image_ids)
+    return {"output": candidate if deliverable else "",
+            "rendered_image_ids": image_ids if deliverable else [],
+            "review_approved": approved, "revision_count": revisions,
+            "review_status": review_status}

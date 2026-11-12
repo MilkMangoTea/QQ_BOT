@@ -3,6 +3,7 @@ import json
 import time
 import traceback
 import uuid
+from weakref import WeakValueDictionary
 
 import websockets
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -16,6 +17,7 @@ from src.qqbot.core.function import (
     build_params_text_only,
     process_single_message,
     ran_rep_text_only,
+    is_allowed_group,
     rep,
 )
 from src.qqbot.core.function_completion import (
@@ -28,8 +30,9 @@ from src.qqbot.core.function_completion import (
 from src.qqbot.core.function_fortune import setup_daily_fortune_scheduler
 from src.qqbot.core.function_long_turn_memory import LocalDictStore
 from src.qqbot.core.function_session_memory import MemoryManager, calc_session_id
+from src.qqbot.core.function_message import QQMessageParser, event_message, sender_name
 from src.qqbot.core.function_tools import TOOLS
-from src.qqbot.core.function_render import build_rendered_image_segments
+from src.qqbot.core.function_render import build_rendered_image_segments, cleanup_rendered_images
 from src.qqbot.utils.console import out
 
 CURRENT_LLM = config.LLM[config.CURRENT_COMPLETION]
@@ -52,6 +55,8 @@ _IMAGE_DESCRIPTION_CACHE_MAX_SIZE = 200
 # 对话链按模型缓存；后台任务集合保证记忆写入任务持续到完成。
 _CHAIN_CACHE = {}
 _BACKGROUND_TASKS = set()
+_MESSAGE_TASKS = set()
+_SESSION_LOCKS = WeakValueDictionary()
 
 def _clear_chain_cache():
     """清空对话链缓存。"""
@@ -84,13 +89,30 @@ async def send_action_and_wait(websocket, action, params, timeout=10.0):
         _pending_actions.pop(echo_id, None)
 
 
+def _empty_completion():
+    return {"text": "", "emoji": None, "rendered_image_ids": []}
+
+
 async def ai_completion(session_id, user_content):
+    """Apply one total deadline to memory lookup, image description and all agent attempts."""
+    history = list(memory_manager.get_history(session_id).messages)
+    try:
+        return await asyncio.wait_for(
+            _ai_completion(session_id, user_content, history),
+            timeout=config.AGENT_CONFIG["TURN_TIMEOUT"],
+        )
+    except asyncio.TimeoutError:
+        out("⏱️ 本轮总预算耗尽，已取消后续生成，本轮不发送")
+        return _empty_completion()
+
+
+async def _ai_completion(session_id, user_content, history_msgs):
     """输入会话标识和消息内容，返回生成的文本回复。"""
     try:
-        user_id = session_id.split(":", 1)[-1] if ":" in session_id else session_id
+        user_id = session_id
 
         if not user_content:
-            return "嗯"
+            return _empty_completion()
 
         # Mem0 是同步客户端，放入工作线程以免阻塞 WebSocket 事件循环。
         user_text = "".join([p.get("text", "") for p in user_content if isinstance(p, dict) and p.get("type") == "text"])
@@ -115,8 +137,7 @@ async def ai_completion(session_id, user_content):
         has_image = any(isinstance(p, dict) and p.get("type") in ["image_url", "image"] for p in user_content)
 
         if not has_image:
-            history = memory_manager.get_history(session_id)
-            for msg in history.messages:
+            for msg in history_msgs:
                 if hasattr(msg, 'content') and isinstance(msg.content, list):
                     if any(isinstance(p, dict) and p.get("type") == "image_url" for p in msg.content):
                         has_image = True
@@ -128,8 +149,6 @@ async def ai_completion(session_id, user_content):
             temp_config = CURRENT_LLM.copy()
             temp_config["NAME"] = names[0]
             llm = create_chat_llm(temp_config)
-
-            history = memory_manager.get_history(session_id)
 
             async def get_image_description(image_url: str) -> str:
                 if image_url in _IMAGE_DESCRIPTION_CACHE:
@@ -145,8 +164,7 @@ async def ai_completion(session_id, user_content):
                 try:
                     if CURRENT_LLM.get("USE_RESPONSES_API"):
                         desc_response = await asyncio.wait_for(
-                            asyncio.to_thread(
-                                llm.invoke,
+                            llm.ainvoke(
                                 [HumanMessage(content=[
                                     {"type": "text", "text": config.IMAGE_DESCRIPTION_PROMPT},
                                     {"type": "image_url", "image_url": {"url": image_url}}
@@ -156,8 +174,7 @@ async def ai_completion(session_id, user_content):
                         )
                     else:
                         desc_response = await asyncio.wait_for(
-                            asyncio.to_thread(
-                                llm.invoke,
+                            llm.ainvoke(
                                 [
                                     SystemMessage(content=config.IMAGE_DESCRIPTION_PROMPT),
                                     HumanMessage(content=[{"type": "image_url", "image_url": {"url": image_url}}])
@@ -183,7 +200,7 @@ async def ai_completion(session_id, user_content):
             MAX_IMAGES = 5
 
             _all_img_urls = []
-            for msg in history.messages:
+            for msg in history_msgs:
                 if isinstance(msg, HumanMessage) and isinstance(msg.content, list):
                     for part in msg.content:
                         if isinstance(part, dict) and part.get("type") == "image_url":
@@ -203,74 +220,36 @@ async def ai_completion(session_id, user_content):
                 _seen.append(u)
             keep_urls = set(_seen[-MAX_IMAGES:])
 
-            for msg in history.messages:
-                if isinstance(msg, HumanMessage) and isinstance(msg.content, list):
-                    text_parts = []
-                    image_descs = []
-
-                    for part in msg.content:
-                        if isinstance(part, dict):
-                            if part.get("type") == "text":
-                                text_parts.append(part.get("text", ""))
-                            elif part.get("type") == "image_url":
-                                img_url = part.get("image_url", {}).get("url", "")
-                                if img_url:
-                                    if img_url in keep_urls:
-                                        desc = await get_image_description(img_url)
-                                        image_descs.append(desc)
-                                    else:
-                                        image_descs.append("[过期图片]")
-
-                    combined_text = "".join(text_parts)
-                    if image_descs:
-                        combined_text += " [图片内容: " + "; ".join(image_descs) + "]"
-
-                    if combined_text.strip():
-                        described_history.append(HumanMessage(content=combined_text))
-                elif isinstance(msg, AIMessage):
-                    described_history.append(msg)
-                elif isinstance(msg, HumanMessage):
-                    described_history.append(msg)
-
-            text_parts = []
-            image_descs = []
-
-            for part in user_content:
-                if isinstance(part, dict):
+            async def describe_parts(parts):
+                result = []
+                for part in parts:
+                    if not isinstance(part, dict):
+                        continue
                     if part.get("type") == "text":
-                        text_parts.append(part.get("text", ""))
-                    elif part.get("type") in ["image_url", "image"]:
-                        img_url = part.get("image_url", {}).get("url", "") if part.get("type") == "image_url" else part.get("url", "")
-                        if img_url:
-                            if img_url in keep_urls:
-                                desc = await get_image_description(img_url)
-                                image_descs.append(desc)
-                            else:
-                                image_descs.append("[过期图片]")
+                        result.append(part.get("text", ""))
+                    elif part.get("type") in ("image_url", "image"):
+                        url = (part.get("image_url", {}).get("url", "")
+                               if part["type"] == "image_url" else part.get("url", ""))
+                        if url:
+                            description = await get_image_description(url) if url in keep_urls else "[过期图片]"
+                            result.append(f"[图片内容: {description}]")
+                return "".join(result)
 
-            combined_text = "".join(text_parts)
-            if image_descs:
-                combined_text += " [图片内容: " + "; ".join(image_descs) + "]"
+            for msg in history_msgs:
+                if isinstance(msg, HumanMessage) and isinstance(msg.content, list):
+                    text = await describe_parts(msg.content)
+                    if text.strip():
+                        described_history.append(HumanMessage(content=text))
+                elif isinstance(msg, (HumanMessage, AIMessage)):
+                    described_history.append(msg)
+
+            combined_text = await describe_parts(user_content)
 
             user_content = [{"type": "text", "text": combined_text}]
 
-            temp_session_id = f"{session_id}_temp_{uuid.uuid4().hex[:8]}"
-            temp_session = memory_manager.get_or_create_session(temp_session_id)
-            temp_session.history.clear()
-            for msg in described_history:
-                temp_session.history.add_message(msg)
-
-            # 同时更新原始会话的最后一条用户消息，替换为包含图片描述的版本
-            original_session = memory_manager.get_or_create_session(session_id)
-            if original_session.history.messages:
-                # 移除最后一条消息（原始的图片消息）
-                original_session.history.messages.pop()
-            # 添加包含描述的消息
-            original_session.history.add_message(HumanMessage(content=combined_text))
-
-            agent_session_id = temp_session_id
-        else:
-            agent_session_id = session_id
+            # Descriptions belong only to this turn's snapshot. Never pop or
+            # rewrite the shared history after awaiting remote image work.
+            history_msgs = described_history
 
         # 依次尝试配置中的候选模型。
         names = [s.strip() for s in str(LLM_NAME).split(",") if s.strip()]
@@ -278,152 +257,130 @@ async def ai_completion(session_id, user_content):
         last_err = None
         max_retries = 2  # 每个模型最多重试 2 次
 
-        try:
-            for model_name in names:
-                retry_count = 0
+        for model_name in names:
+            retry_count = 0
 
-                while retry_count <= max_retries:
-                    try:
-                        temp_config = CURRENT_LLM.copy()
-                        temp_config["NAME"] = model_name
-
-                        if model_name not in _CHAIN_CACHE:
-                            _CHAIN_CACHE[model_name] = create_agent_chain_with_memory(
-                                memory_manager=memory_manager,
-                                long_memory_pool=memory_pool,
-                                system_prompt=system_prompt,
-                                llm_config=temp_config,
-                                tools=TOOLS
-                            )
-                        chain = _CHAIN_CACHE[model_name]
-
-                        input_msg = HumanMessage(content=user_content)
-
-                        if retry_count > 0:
-                            out("🔄 模型重试", f"{model_name}，第 {retry_count + 1} 次")
-
-                        emoji_options = get_available_emojis()
-                        try:
-                            response = await asyncio.wait_for(
-                                chain.ainvoke(
-                                    {
-                                        "input": [input_msg],
-                                        "long_memory": long_mem,
-                                        "emoji_options": emoji_options,
-                                    },
-                                    run_config={"configurable": {"session_id": agent_session_id}}
-                                ),
-                                timeout=config.AGENT_CONFIG["TURN_TIMEOUT"]
-                            )
-                        except asyncio.TimeoutError as timeout_err:
-                            last_err = timeout_err
-                            # Cancel the async graph rather than restarting all searches
-                            # while the previous synchronous chain is still running.
-                            out("⏱️ 本轮 Agent 已超时取消，不重做整轮工具调用", model_name)
-                            return "这次没来得及处理完。"
-
-                        if isinstance(response, dict):
-                            content = response.get("output", "")
-                            rendered_ids = response.get("rendered_image_ids", [])
-                        else:
-                            content = response.content if hasattr(response, 'content') else str(response)
-                            rendered_ids = []
-
-                        content = lc_message_to_text(content) if not isinstance(content, str) else content
-                        content = content.strip() if content else ""
-                        out("🤖 AI 原始回复:", content or "（空）")
-
-                        if not content or "Agent stopped due to" in content:
-                            content = "嗯"
-
-                        content, emoji_name = parse_emoji_reply(content, emoji_options)
-
-                        out("短期记忆：", memory_manager.get_or_create_session(session_id).history)
-                        out("✅ 使用模型：", model_name)
-
-                        def add_long_memory():
-                            try:
-                                memory_pool.add_turn(
-                                    user_id=user_id,
-                                    user_text=user_text,
-                                    assistant_text=content
-                                )
-                            except Exception as e:
-                                out("⚠️ Mem0 写入失败", e)
-
-                        # 记忆写入不阻塞回复；保留任务引用以便其执行完成。
-                        task = asyncio.create_task(asyncio.to_thread(add_long_memory))
-                        _BACKGROUND_TASKS.add(task)
-                        task.add_done_callback(_BACKGROUND_TASKS.discard)
-
-                        return {
-                            "text": content,
-                            "emoji": emoji_name,
-                            "rendered_image_ids": rendered_ids,
-                        }
-
-                    except Exception as e:
-                        last_err = e
-                        retry_count += 1
-                        if retry_count <= max_retries:
-                            out("⚠️ 模型调用失败，准备重试", f"{model_name}: {e}")
-                            await asyncio.sleep(1)
-                            continue
-                        else:
-                            out("⚠️ 模型调用失败，已达最大重试次数", f"{model_name}: {e}")
-                            break
-        finally:
-            if has_image and agent_session_id != session_id:
+            while retry_count <= max_retries:
+                response_received = False
+                rendered_ids = []
                 try:
-                    if agent_session_id in memory_manager._sessions:
-                        del memory_manager._sessions[agent_session_id]
-                except Exception as e:
-                    out("⚠️ 清理临时会话失败", e)
+                    temp_config = CURRENT_LLM.copy()
+                    temp_config["NAME"] = model_name
 
+                    if model_name not in _CHAIN_CACHE:
+                        _CHAIN_CACHE[model_name] = create_agent_chain_with_memory(
+                            memory_manager=memory_manager,
+                            long_memory_pool=memory_pool,
+                            system_prompt=system_prompt,
+                            llm_config=temp_config,
+                            tools=TOOLS
+                        )
+                    chain = _CHAIN_CACHE[model_name]
+
+                    input_msg = HumanMessage(content=user_content)
+
+                    if retry_count > 0:
+                        out("🔄 模型重试", f"{model_name}，第 {retry_count + 1} 次")
+
+                    emoji_options = get_available_emojis()
+                    response = await chain.ainvoke(
+                        {"input": [input_msg], "long_memory": long_mem,
+                         "emoji_options": emoji_options, "history": history_msgs},
+                        run_config={"configurable": {"session_id": session_id}},
+                    )
+                    response_received = True
+                    if isinstance(response, dict):
+                        rendered_ids = response.get("rendered_image_ids", [])
+                    if (config.AGENT_CONFIG["REVIEW_ENABLED"]
+                            and (not isinstance(response, dict)
+                                 or response.get("review_approved") is not True)):
+                        out("⛔ 回复未通过后台验收，本轮不发送、不写入记忆",
+                            response.get("review_status", "unknown") if isinstance(response, dict) else "invalid_result")
+                        cleanup_rendered_images(rendered_ids)
+                        return _empty_completion()
+                    if isinstance(response, dict):
+                        content = response.get("output", "")
+                        rendered_ids = response.get("rendered_image_ids", [])
+                    else:
+                        content = response.content if hasattr(response, 'content') else str(response)
+                        rendered_ids = []
+
+                    content = lc_message_to_text(content) if not isinstance(content, str) else content
+                    content = content.strip() if content else ""
+                    out("🤖 AI 原始回复:", content or "（空）")
+
+                    if not content or "Agent stopped due to" in content:
+                        cleanup_rendered_images(rendered_ids)
+                        return _empty_completion()
+                    try:
+                        content, emoji_name = parse_emoji_reply(content, emoji_options)
+                    except ValueError as error:
+                        out("⛔ 回复协议解析失败，本轮不发送", error)
+                        cleanup_rendered_images(rendered_ids)
+                        return _empty_completion()
+
+                    out("短期记忆：", memory_manager.get_or_create_session(session_id).history)
+                    out("✅ 使用模型：", model_name)
+
+                    return {
+                        "text": content,
+                        "emoji": emoji_name,
+                        "rendered_image_ids": rendered_ids,
+                        "memory_turn": {"user_id": user_id, "user_text": user_text},
+                    }
+
+                except Exception as e:
+                    if response_received:
+                        cleanup_rendered_images(rendered_ids)
+                        out("⛔ 生成后的处理失败，不重新执行模型和工具", e)
+                        return _empty_completion()
+                    last_err = e
+                    retry_count += 1
+                    if retry_count <= max_retries:
+                        out("⚠️ 模型调用失败，准备重试", f"{model_name}: {e}")
+                        await asyncio.sleep(1)
+                        continue
+                    else:
+                        out("⚠️ 模型调用失败，已达最大重试次数", f"{model_name}: {e}")
+                        break
         # 所有模型都失败，返回默认回复
         out("⚠️ 全部候选模型失败", last_err)
-        out("💬 返回默认回复")
-        return "嗯"
+        out("⛔ 本轮生成失败，不发送未经处理的兜底回复")
+        return _empty_completion()
 
     except Exception as e:
         out("⚠️ 调用 LLM 发生错误", e)
-        out("💬 返回默认回复")
-        return "嗯"
+        out("⛔ 本轮生成失败，不发送未经处理的兜底回复")
+        return _empty_completion()
 
 
-async def send_message(websocket, params, action="send_msg", retry_count=3):
-    """调用 OneBot action 发送消息，并在连接异常时重试。"""
+async def send_message(websocket, params, action="send_msg"):
+    """Only report success after OneBot acknowledges delivery."""
     if params is None:
         raise ValueError("params is None")
-
-    for attempt in range(retry_count):
-        try:
-            await websocket.send(json.dumps({
-                "action": action,
-                "params": params
-            }))
-            if attempt > 0:
-                out("✅ 消息重试成功", f"第 {attempt + 1} 次")
+    try:
+        result = await send_action_and_wait(websocket, action, params)
+        if (isinstance(result, dict) and result.get("status") == "ok"
+                and result.get("retcode") == 0):
             return True
-
-        except (websockets.exceptions.ConnectionClosed, websockets.exceptions.WebSocketException) as e:
-            out("⚠️ WebSocket 发送错误", f"第 {attempt + 1}/{retry_count} 次: {e}")
-            if attempt < retry_count - 1:
-                await asyncio.sleep(1)
-            else:
-                out("❌ 消息发送失败，已达到最大重试次数")
-                return False
-
-        except Exception as e:
-            out("⚠️ 消息发送异常", e)
-            return False
-
+        # An ACK timeout is ambiguous: resending could duplicate a message.
+        out("⚠️ OneBot 未确认发送成功，不自动重发、不写入回复记忆",
+            {"状态": result.get("status"), "返回码": result.get("retcode")} if result else "无回执")
+    except Exception as error:
+        out("⚠️ 消息发送异常", error)
     return False
 
 async def remember(websocket, event):
     """初始化会话历史并保存当前消息，返回模型输入内容。"""
     try:
         session_id = calc_session_id(event)
+        async def message_action(action, params, timeout):
+            return await send_action_and_wait(websocket, action, params, timeout=timeout)
+
+        parser = QQMessageParser(
+            config.SELF_USER_ID, action=message_action,
+            lookup=lambda message_id, seq: memory_manager.get_source_message(session_id, message_id, seq),
+        )
 
         # 首次收到该会话的消息时，从 NapCat 补齐最近上下文。
         if not memory_manager.is_session_initialized(session_id):
@@ -434,23 +391,46 @@ async def remember(websocket, event):
             act = "get_group_msg_history" if msg_type == "group" else "get_friend_msg_history"
             current_id = event[key]
 
+            params = {key: current_id, "message_seq": 0, "count": config.MESSAGE_COUNT}
+            if msg_type == "group":
+                params["parse_mult_msg"] = False
             result = await send_action_and_wait(
                 websocket,
                 act,
-                {key: current_id, "message_seq": 0},
+                params,
                 timeout=5.0
             )
 
             if result and result.get("status") == "ok":
-                messages = result.get("data", {}).get("messages", [])
+                data = result.get("data")
+                messages = data.get("messages", []) if isinstance(data, dict) else []
+                messages = [msg for msg in messages if isinstance(msg, dict)] if isinstance(messages, list) else []
+                # The latest-history response can already contain this event
+                # and even later queued events. Keep only its predecessors.
+                message_id = event.get("message_id")
+                found_current = False
+                if message_id is not None:
+                    for index, previous in enumerate(messages):
+                        if str(previous.get("message_id")) == str(message_id):
+                            messages = messages[:index]
+                            found_current = True
+                            break
+                if not found_current:
+                    # A busy group can push this event out of the returned
+                    # history window. Never import messages newer than it.
+                    event_time = event.get("time")
+                    messages = [previous for previous in messages
+                                if isinstance(event_time, (int, float))
+                                and isinstance(previous.get("time"), (int, float))
+                                and previous["time"] < event_time]
                 history_msgs = messages[-config.MESSAGE_COUNT:] if messages else []
-                if history_msgs:
-                    await memory_manager.initialize_with_history(session_id, history_msgs)
+                await memory_manager.initialize_with_history(
+                    session_id, history_msgs, event_context=event)
 
-        message = event.get("message")
-        nickname = event.get("sender").get("nickname")
+        message = event_message(event)
+        nickname = sender_name(event)
 
-        msgs = await process_single_message(message, nickname, CURRENT_LLM)
+        msgs = await process_single_message(message, nickname, CURRENT_LLM, parser=parser, event=event)
 
         # 统一保留文本与图片分段，供后续模型调用使用。
         all_user_content = []
@@ -460,8 +440,6 @@ async def remember(websocket, event):
             content = msg.get("content", [])
 
             if role == "user" and content:
-                memory_manager.add_user_message(session_id, content)
-
                 if isinstance(content, list):
                     all_user_content.extend(content)
                 else:
@@ -479,6 +457,10 @@ async def remember(websocket, event):
                 if text:
                     out("💾 新用户消息:", text[:80])
 
+        # One QQ event is one history message, including all text/image segments.
+        if all_user_content:
+            memory_manager.add_user_message(session_id, all_user_content)
+        memory_manager.cache_message(session_id, event)
         return all_user_content if all_user_content else None
 
     except Exception as e:
@@ -510,12 +492,28 @@ async def handle_message(websocket, event, user_content):
         if content:
             message_segments.append({"type": "text", "data": {"text": content}})
 
-        message_segments.extend(await build_rendered_image_segments(rendered_ids))
-        if message_segments:
-            await send_message(websocket, build_params("segments", event, message_segments))
+        images = await build_rendered_image_segments(rendered_ids)
+        if len(images) != len(rendered_ids):
+            out("⛔ 渲染附件不完整，本轮不发送成功文案、不写入回复记忆")
+            return
+        message_segments.extend(images)
+        if not message_segments:
+            return
+        if not await send_message(websocket, build_params("segments", event, message_segments)):
+            return
 
         memory_manager.add_ai_message(session_id, content)
         out("💾 AI 回复已加入上下文:", content[:80])
+        memory_turn = completion.get("memory_turn") if isinstance(completion, dict) else None
+        if memory_turn and content:
+            def add_long_memory():
+                try:
+                    memory_pool.add_turn(assistant_text=content, **memory_turn)
+                except Exception as error:
+                    out("⚠️ Mem0 写入失败", error)
+            task = asyncio.create_task(asyncio.to_thread(add_long_memory))
+            _BACKGROUND_TASKS.add(task)
+            task.add_done_callback(_BACKGROUND_TASKS.discard)
 
         if emoji_name:
             emoji_params = await build_emoji_params(event, emoji_name)
@@ -537,7 +535,7 @@ async def qq_bot():
     ) as ws:
         out("✅ 已连接 WebSocket 服务器")
 
-        setup_daily_fortune_scheduler(
+        fortune_scheduler = setup_daily_fortune_scheduler(
             websocket=ws,
             target_groups=FORTUNE_GROUPS,
             push_hour=8,
@@ -558,16 +556,18 @@ async def qq_bot():
                                 future.set_result(event)
                         continue
 
+                    # ACK waits run in tasks so this sole reader stays available.
+
                     if event.get("post_type") == "notice" and event.get("sub_type") == "poke" and event.get(
                             "target_id") == config.SELF_USER_ID:
-                        await send_message(ws, build_params_text_only(event, ran_rep_text_only()))
+                        _start_message_task(send_message(ws, build_params_text_only(event, ran_rep_text_only())))
                         continue
 
                     if event.get("post_type") != "message":
                         continue
 
                     # 消息处理可能包含远程调用，交由独立任务执行。
-                    asyncio.create_task(_process_message_concurrent(ws, event))
+                    _start_message_task(_process_message_concurrent(ws, event))
 
                 except json.JSONDecodeError:
                     out("⚠️ 收到非 JSON 格式消息")
@@ -576,18 +576,48 @@ async def qq_bot():
 
         finally:
             out("🔌 连接断开，清理悬空 action 请求")
+            fortune_scheduler.shutdown(wait=False)
             for fut in list(_pending_actions.values()):
                 if not fut.done():
                     fut.cancel()
             _pending_actions.clear()
+            tasks = list(_MESSAGE_TASKS)
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _start_message_task(coroutine):
+    task = asyncio.create_task(coroutine)
+    _MESSAGE_TASKS.add(task)
+    task.add_done_callback(_MESSAGE_TASKS.discard)
+    return task
 
 
 async def _process_message_concurrent(ws, event):
-    """处理单条消息，并在需要时发送回复。"""
+    """Serialize each conversation; independent groups may still run concurrently."""
     try:
-        sender = event.get("sender") or {}
+        session_id = calc_session_id(event)
+        lock = _SESSION_LOCKS.get(session_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            _SESSION_LOCKS[session_id] = lock
+        async with lock:
+            await _process_message(ws, event)
+    except Exception as error:
+        out("⚠️ 会话处理失败", error)
+
+
+async def _process_message(ws, event):
+    """Record and handle one event while holding its conversation lock."""
+    try:
+        sender = event.get("sender") if isinstance(event.get("sender"), dict) else {}
         sender_id = sender.get("user_id", event.get("user_id"))
         if str(sender_id) == str(config.SELF_USER_ID):
+            memory_manager.cache_message(calc_session_id(event), event)
+            return
+        if not is_allowed_group(event):
             return
 
         user_content = await remember(ws, event)
