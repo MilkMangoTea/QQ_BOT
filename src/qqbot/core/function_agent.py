@@ -13,37 +13,42 @@ from src.qqbot.utils.console import out
 
 REVIEW_INSTRUCTION = """
 【后台验收，不是给用户的回复】
-你的任务是判断这条回复能否作为 MilkMangoTower 在当前群聊中的真实发言直接发送。
-先理解当前交流中谁在说话、想表达什么、期待怎样的回应，再看候选实际完成了什么。
-【1. 人格、自然语言与去八股——核心】
-结合完整人格提示词和当前群聊，判断候选是不是这个人物此刻会说的话。
-关注人物如何理解对方、选择回应、表达态度，以及语言是否自然承接前文。
-尤其留意普通 AI 回答套上角色口癖、用复述代替回应、用空泛分析回避个人态度、对已经说清的内容反复解释等机械表达。
-发现这些问题时，判断它们是否真的破坏了交流。角色本来就可能冷淡、简短、重复、嘴硬或说些没什么信息量的话。
-语言自然与否取决于具体语境，不要求每句话都鲜明地表现人格，也不以遣词是否足够独特作为验收标准。
-【2. 完整性】
-对照当前请求检查实际结果。该回答的是否答到核心，该选择的是否明确选择，多对象、多条件和多项任务是否完成了对应要求。
-确保对话不存在冗长，列举或重复的内容，避免无信息量的空泛总结、套话或八股。除非设计专业知识，对话长度应当维持在一两句的自然语言水平。
-【3. 事实与执行】
-检索、计算和执行结论以实际可见的工具结果为准，不以候选自称为准。需要覆盖多个目标时分别核对；稳定常识和主观看法不要求额外检索。
-【4. 输出】
-核对本轮 reply/emoji JSON、表情选项及完整人格提示词中的硬性格式要求。面向群友的正文不带说话者前缀、后台内容或工具日志。出处和链接按用户实际要求提供。
-【判定与迭代】
-Counterdefault：第一份合格的候选就是可以发送的成品。
-审核重点是发现实际问题，以及寻找更好的表达方式。
-如果候选存在明显八股、人格失真、答非所问、事实错误或格式问题，feedback 直接指出具体位置及必要的修改方向。
-没有明确缺陷，返回 approved=true。
+判断最后一条候选回复能否作为 MilkMangoTower 在当前群聊中的真实发言直接发送。结合完整人格提示词、聊天上下文、原始请求及本轮实际工具结果，逐项检查：
+- 意图：理解谁在对谁说话，以及对方期待什么回应。区分事实提问、个人好恶、建议、玩梗、假设和情绪交流；检查候选是否真正接住对方的话，是否把主观交流误答成客观介绍，或用复述、条件句和空泛分析回避回应。
+- 人格：先从原始人格中找出与本轮内容相关的设定，再逐条对照候选表达的个人偏好、情感指向、立场、关系和行为，包括自然表达中隐含的态度。reason 须引用最相关的设定原文和候选对应表达，说明是否冲突，不能只凭口癖或语气判定。任一相关设定被明确违背即不通过，其他性格特征的符合不能抵消冲突。只检查本轮相关设定，不要求展示全部人格；客观描述他人或介绍事实不等于表达自身偏好，不为体现人格歪曲事实或添加无关内容。
+- 自然度：判断候选是不是这个人物此刻会说的话，是否自然承接前文。留意普通 AI 回答套角色口癖、客服腔、无意义复述、空泛总结和不必要的展开。角色可以冷淡、简短、嘴硬或说些信息量不大的话，不因措辞普通就判定不合格。闲聊通常保持一两句，认真解释时可按需展开。
+- 完成度与事实：检查是否回答核心问题、表达应有的选择或态度，并完成多对象、多条件和多项任务。检索、计算和执行结论以实际可见的工具结果为准，不能相信候选自称完成；多个目标分别核对，稳定常识和主观看法不要求额外检索。
+- 格式：检查 reply/emoji JSON、可选表情及人格中的硬性表达要求。正文不能带说话者前缀、后台内容或工具日志；出处和链接按用户实际要求提供。按规则本意判断，区分分句与完整句子，不因句末语气符号自行增加禁令；声称违反字数限制时须先逐字核对。
+【判定要求】
+- 判定依据只描述候选、上下文及工具结果中可见的内容；发现错误直接指出错误，不猜测作者是否故意、是否为了玩梗或是否想迎合。
+- 每项返回“通过”“不通过”或“不适用”，并附一句具体依据；不通过时指出具体表达或遗漏，以及必要的修改方向。
+- 相关设定存在明确冲突时必须判为不通过，不能因回复自然、任务完成或带有口癖而放行。
+- 不为凑检查结果强找缺陷，也不为了寻找更好的措辞反复退回合格回复。第一份合格候选即可发送。
+- 任一项不通过，整体就不通过；整体结论由程序汇总，不另填总判定。
 【返回格式】
-只返回一个检查 JSON，覆盖面向用户的 reply/emoji 输出格式。
-通过：
-{"approved": true, "feedback": ""}
-不通过：
-{"approved": false, "feedback": "具体缺陷及必要的局部修正"}
-不输出思维过程、审核清单或改写后的回复。
+本次只返回以下审核 JSON，替代面向群友的 reply/emoji 输出要求。五项不可省略，status 选择“通过”“不通过”或“不适用”，reason 填写简短依据。不输出完整思维过程或改写后的回复。
+{
+  "intent": {"status": "通过", "reason": "具体依据"},
+  "persona": {"status": "通过", "reason": "具体依据"},
+  "naturalness": {"status": "通过", "reason": "具体依据"},
+  "completeness": {"status": "通过", "reason": "具体依据"},
+  "format": {"status": "通过", "reason": "具体依据"}
+}
 """
 
 
+REVIEW_CHECKS = {
+    "intent": "意图",
+    "persona": "人格",
+    "naturalness": "自然度",
+    "completeness": "完成度与事实",
+    "format": "格式",
+}
+
+
 def _parse_review(content):
+    if not isinstance(content, str):
+        return None
     text = content.strip()
     if text.startswith("```") and text.endswith("```"):
         text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
@@ -51,12 +56,23 @@ def _parse_review(content):
         decision = json.loads(text)
     except (ValueError, TypeError):
         return None
-    if not isinstance(decision, dict) or type(decision.get("approved")) is not bool:
+    if not isinstance(decision, dict) or set(decision) != set(REVIEW_CHECKS):
         return None
-    feedback = decision.get("feedback", "")
-    if not isinstance(feedback, str) or (not decision["approved"] and not feedback.strip()):
-        return None
-    return decision["approved"], feedback.strip()[:3000]
+    checks = {}
+    failures = []
+    for key, label in REVIEW_CHECKS.items():
+        item = decision[key]
+        if not isinstance(item, dict):
+            return None
+        status = item.get("status")
+        reason = item.get("reason")
+        if (status not in ("通过", "不通过", "不适用")
+                or not isinstance(reason, str) or not reason.strip()):
+            return None
+        checks[key] = {"status": status, "reason": reason.strip()[:1500]}
+        if status == "不通过":
+            failures.append(f"{label}：{checks[key]['reason']}")
+    return not failures, "\n".join(failures), checks
 
 
 def render_status(messages, enabled, to_text):
@@ -118,6 +134,7 @@ async def _run_reviewed_agent(executor, llm, messages, system_prompt, output_ins
     graph_config["recursion_limit"] = settings["MAX_GRAPH_STEPS"]
     candidate = ""
     approved = None
+    review_checks = {}
     revisions = 0
     review_status = "disabled" if not settings["REVIEW_ENABLED"] else "pending"
 
@@ -157,6 +174,7 @@ async def _run_reviewed_agent(executor, llm, messages, system_prompt, output_ins
             break
 
         approved = None
+        review_checks = {}
         status = render_status(messages, render_enabled, to_text)
         try:
             background = "\n".join(to_text(msg) for msg in messages if isinstance(msg, SystemMessage))
@@ -176,8 +194,10 @@ async def _run_reviewed_agent(executor, llm, messages, system_prompt, output_ins
             review_status = "review_failed"
             out("⚠️ 后台验收不可用，禁止发送未通过的候选")
             break
-        approved, feedback = decision
-        out("回复后台验收", {"通过": approved, "修正次数": revisions, "反馈": feedback})
+        approved, feedback, review_checks = decision
+        out("回复后台验收", {"通过": approved, "修正次数": revisions,
+                            "逐项结果": {REVIEW_CHECKS[key]: item for key, item in review_checks.items()},
+                            "反馈": feedback})
         if approved:
             review_status = "approved"
             break
@@ -206,4 +226,5 @@ async def _run_reviewed_agent(executor, llm, messages, system_prompt, output_ins
     return {"output": candidate if deliverable else "",
             "rendered_image_ids": image_ids if deliverable else [],
             "review_approved": approved, "revision_count": revisions,
+            "review_checks": review_checks,
             "review_status": review_status}
