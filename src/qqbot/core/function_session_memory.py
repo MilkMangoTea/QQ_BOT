@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -214,45 +215,30 @@ class MemoryManager:
         ))
         session.touch()
 
-    def get_recent_dialog_lines(
-            self,
-            session_id: str,
-            take_n: int = 10,
-            max_chars_per_line: int = 240,
-    ) -> List[str]:
-        # 获取最近的对话
-        session = self.get_or_create_session(session_id)
-        messages = session.history.messages[-take_n:]
-
-        lines: List[str] = []
-        for msg in messages:
-            role = getattr(msg, "type", "")
-            content_raw = getattr(msg, "content", "") or ""
-
-            # 处理多模态内容（list）或纯文本（str）
-            if isinstance(content_raw, list):
-                text_parts = []
-                for part in content_raw:
-                    if isinstance(part, dict) and part.get("type") == "text":
-                        text_parts.append(part.get("text", ""))
-                content = "".join(text_parts).strip()
-            else:
-                content = content_raw.strip() if isinstance(content_raw, str) else ""
-
-            if not content:
+    def get_decision_messages(self, session_id: str):
+        """Project public chat history as stable routing data, without extra state."""
+        messages = []
+        for msg in list(self.get_history(session_id).messages):
+            if not isinstance(msg, (HumanMessage, AIMessage)):
                 continue
-
-            if role == "ai":
-                line = f"BOT: {content}"
+            content_raw = msg.content
+            if isinstance(content_raw, list):
+                parts = []
+                for part in content_raw:
+                    if isinstance(part, str):
+                        parts.append(part)
+                    elif isinstance(part, dict) and part.get("type") == "text":
+                        parts.append(part.get("text", ""))
+                    elif isinstance(part, dict) and part.get("type") in {"image_url", "image"}:
+                        parts.append("[图片]")
+                content = "".join(parts)
             else:
-                line = content
-
-            if max_chars_per_line and len(line) > max_chars_per_line:
-                line = line[:max_chars_per_line] + "…"
-
-            lines.append(line)
-
-        return lines
+                content = content_raw
+            # Bot replies are observed chat, not the router's assistant output.
+            payload = {"speaker": "BOT" if isinstance(msg, AIMessage) else "MEMBER",
+                       "content": content}
+            messages.append(HumanMessage(content="【聊天消息】\n" + json.dumps(payload, ensure_ascii=False)))
+        return messages
 
     # 检查会话是否已初始化
     def is_session_initialized(self, session_id: str) -> bool:
