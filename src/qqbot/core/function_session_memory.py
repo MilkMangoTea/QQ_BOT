@@ -4,10 +4,35 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from src.qqbot.config.config import SELF_USER_ID
 from src.qqbot.core.function_message import QQMessageParser, event_message, sender_id, sender_name
 from src.qqbot.utils.console import out
+
+
+@dataclass
+class PromptContext:
+    source_keys: list = field(default_factory=list)
+    messages: list = field(default_factory=list)
+    runtime_context: str = ""
+    image_descriptions: dict = field(default_factory=dict)
+
+    def prepare(self, history, current, runtime_context):
+        source = [*history, current]
+        keys = [(message.type, message.content) for message in source]
+        if keys[:len(self.source_keys)] != self.source_keys:
+            # Explicitly replaced history starts a new context, never splice an
+            # old conversation's annotations into a different source sequence.
+            self.source_keys.clear()
+            self.messages.clear()
+            self.runtime_context = ""
+        for index in range(len(self.source_keys), len(source)):
+            if index == len(source) - 1 and runtime_context != self.runtime_context:
+                self.messages.append(SystemMessage(content=runtime_context))
+                self.runtime_context = runtime_context
+            self.messages.append(source[index])
+            self.source_keys.append(keys[index])
+        return list(self.messages)
 
 
 @dataclass
@@ -18,6 +43,7 @@ class SessionMemory:
     last_proactive_reply_time: float = 0.0  # 上次主动插话的时间
     is_initialized: bool = False
     source_messages: Dict[str, Dict] = field(default_factory=dict)
+    prompt_context: PromptContext = field(default_factory=PromptContext)
 
     def touch(self) -> None:
         self.last_update_time = time.time()
@@ -36,11 +62,11 @@ class MemoryManager:
     def __init__(
             self,
             timeout: Optional[float] = None,
-            context_window: int = 15  # 提供给 LLM 的最大消息数
+            context_window: int = 15  # 仅限制新会话导入的历史条数
     ):
         """
         :param timeout: 会话超时时间（秒）
-        :param context_window: 提供给 LLM 的最大消息数
+        :param context_window: 新会话初始化的最大历史消息数，存活期间不裁剪
         """
         self._timeout = timeout
         self._context_window = context_window
@@ -81,6 +107,7 @@ class MemoryManager:
 
         # 清空现有历史
         session.history.clear()
+        session.prompt_context = PromptContext()
         parser = parser or QQMessageParser(
             SELF_USER_ID, quote_chars=500,
             lookup=lambda message_id, seq: self.get_source_message(session_id, message_id, seq))
@@ -152,29 +179,11 @@ class MemoryManager:
         return session.source_messages.get(f"id:{message_id}") if message_id is not None else None
 
     def get_history(self, session_id: str) -> BaseChatMessageHistory:
-        """
-        获取会话历史记录
+        """读取完整会话历史；调用者取快照，写入使用 add_* 方法。"""
+        return self.get_or_create_session(session_id).history
 
-        返回会话上下文：
-        - 当消息数 <= context_window 时，返回原始 session.history（可修改）
-        - 当消息数 > context_window 时，返回裁剪后的新对象（只读，修改不会影响原 session）
-        - 调用者应只读取返回的历史，不要直接修改
-        - 使用 add_user_message/add_ai_message 方法来添加新消息
-        """
-        session = self.get_or_create_session(session_id)
-
-        all_messages = session.history.messages
-
-        # 如果消息数不超过限制，直接返回
-        if len(all_messages) <= self._context_window:
-            return session.history
-
-        # 裁剪：只保留最近的消息（返回新对象，只读）
-        limited_history = ChatMessageHistory()
-        for msg in all_messages[-self._context_window:]:
-            limited_history.add_message(msg)
-
-        return limited_history
+    def get_prompt_context(self, session_id):
+        return self.get_or_create_session(session_id).prompt_context
 
     def add_user_message(self, session_id: str, content) -> None:
         """
@@ -195,11 +204,14 @@ class MemoryManager:
 
         session.touch()
 
-    def add_ai_message(self, session_id: str, text: str) -> None:
-        if not text:
+    def add_ai_message(self, session_id: str, text: str, model_content=None) -> None:
+        if not text and not model_content:
             return
         session = self.get_or_create_session(session_id)
-        session.history.add_ai_message(text)
+        session.history.add_message(AIMessage(
+            content=text,
+            additional_kwargs={"model_content": model_content} if model_content is not None else {},
+        ))
         session.touch()
 
     def get_recent_dialog_lines(

@@ -6,7 +6,7 @@ load_dotenv(dotenv_path="/opt/QQ_BOT/my_env/api_key.env")  # 指定绝对路径
 # 配置参数
 
 # 导入的最近消息数量(这个数量至少为1,否则不引入最新内容)
-# 与 MemoryManager 的 context_window 保持一致，确保完整的上下文
+# 仅用于新会话初始化；存活期间的历史持续追加，不按条数裁剪。
 MESSAGE_COUNT = 15
 
 # 需要监听的目标用户QQ号
@@ -20,6 +20,9 @@ SELF_USER_ID = int(os.environ.get("BOT_QQ_ID"))
 
 # 随机回复概率
 RAN_REP_PROBABILITY = 0
+
+# 自然语言回复判定：普通群消息由模型判断是否参与；@、引用机器人及私聊始终响应。
+ENABLE_NATURAL_LANGUAGE_REPLY = True
 
 # 图片描述 Prompt（用于 Agent 工具调用场景）
 IMAGE_DESCRIPTION_PROMPT = """你是一个精确的图像分析助手。请详细描述图片内容，重点关注：
@@ -49,8 +52,8 @@ WEB_SEARCH_REPLY_PROMPT = """【联网资料与事实】
 - 搜索失败、结果为空、来源冲突或证据不足时，不要编造；用符合当前人格的自然说法简短表达不确定，不要输出模板化免责声明。
 """
 
-# 遗忘时间
-HISTORY_TIMEOUT = 1200
+# 闲置一小时后过期；每次会话活动会延长存活时间。
+HISTORY_TIMEOUT = 3600
 
 # 控制台指令
 CMD_PREFIX = "/s"
@@ -155,57 +158,51 @@ PROMPT = [
 """
 ]
 
-# llm state
-CURRENT_COMPLETION = "DEEPSEEK"
+# 模型与供应商配置由 model.toml 加载；保留统一访问入口。
+try:
+    import tomllib
+except ImportError:  # Python 3.8–3.10
+    import tomli as tomllib
 
-LLM = {
-	"DEEPSEEK": {
-	    "KEY": os.getenv("DEEPSEEK"),
-	    "URL": "https://api.deepseek.com",
-	    "NAME": "deepseek-flash"
-	},
-    "ZHIPU": {
-        "KEY": os.getenv("ZHIPU"),
-        "URL": "https://open.bigmodel.cn/api/paas/v4/",
-        "NAME": "glm-4.5-flash"
-    },
-    "ALI": {
-        "KEY": os.getenv("ALI"),
-        "URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "NAME": "qwen2.5-vl-72b-instruct"
-    },
-    "ALI-MAX": {
-        "KEY": os.getenv("ALI"),
-        "URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "NAME": "qwen-plus"
-    },
-    "AIZEX": {
-        "KEY": os.getenv("AIZEX"),
-        "URL": "https://a1.aizex.me/v1",
-        "NAME": "gpt-4.1,gpt-5,gpt-4.1-mini,claude-4-sonnet"
-    },
-    "Embedding": {
-        "KEY": os.getenv("AIZEX"),
-        "URL": "https://a1.aizex.me/v1",
-        "NAME": "text-embedding-3-large"
-    },
-    "FREEGPT": {
-        "KEY": os.getenv("FREEGPT"),
-        "URL": "https://newapi.pytrio.asia/v1",
-        "NAME": "gpt-5.6-terra,gpt-5.6-sol,gpt-5.6-luna",
-        "USE_RESPONSES_API": True
-    },
-    "FREEGPT-NONREASONING": {
-        "KEY": os.getenv("FREEGPT"),
-        "URL": "https://newapi.pytrio.asia/v1",
-        "NAME": "deepseek-ai/deepseek-v4-pro"
-    }
-}
+
+DEFAULT_MODEL_FILE = Path(__file__).resolve().parents[3] / "model.toml"
+
+
+def load_model_config(path=None):
+    path = Path(path or os.getenv("QQBOT_MODEL_FILE") or DEFAULT_MODEL_FILE)
+    with path.open("rb") as stream:
+        data = tomllib.load(stream)
+    current = data.get("current_completion")
+    providers = data.get("providers", {})
+    if not isinstance(providers, dict):
+        raise ValueError("model.toml: providers 必须为表")
+    if not isinstance(current, str) or current not in providers:
+        raise ValueError("model.toml: current_completion 必须指向已配置的 providers 项")
+    models = {}
+    for alias, provider in providers.items():
+        if not isinstance(provider, dict):
+            raise ValueError(f"model.toml: providers.{alias} 必须为表")
+        for key in ("name", "base_url", "api_key_env"):
+            value = provider.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"model.toml: providers.{alias}.{key} 必须为非空字符串")
+        responses = provider.get("use_responses_api", False)
+        if not isinstance(responses, bool):
+            raise ValueError(f"model.toml: providers.{alias}.use_responses_api 必须为布尔值")
+        models[alias] = {
+            "NAME": provider["name"],
+            "URL": provider["base_url"],
+            "KEY": os.getenv(provider["api_key_env"]),
+            "USE_RESPONSES_API": responses,
+        }
+    return current, models
+
+CURRENT_COMPLETION, LLM = load_model_config()
 
 # DeepSeek Search 是独立接口，可供其他支持工具调用的聊天模型使用。
 DEEPSEEK_SEARCH_CONFIG = {
     "ENABLED": os.getenv("DEEPSEEK_SEARCH_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
-    "KEY": LLM["DEEPSEEK"]["KEY"],
+    "KEY": LLM.get("DEEPSEEK", {}).get("KEY"),
     "URL": "https://api.deepseek.com/v1/tools/search",
     "TIMEOUT": 15.0,
     "RESULT_COUNT": 5,
@@ -233,17 +230,17 @@ MEM0_CONFIG = {
     "llm": {
         "provider": "openai",
         "config": {
-            "api_key": LLM.get("AIZEX").get("KEY"),
-            "openai_base_url": LLM.get("AIZEX").get("URL"),
-            "model": "gpt-4o-mini",
+            "api_key": LLM.get("Memory", {}).get("KEY"),
+            "openai_base_url": LLM.get("Memory", {}).get("URL"),
+            "model": LLM.get("Memory", {}).get("NAME"),
         },
     },
     "embedder": {
         "provider": "openai",
         "config": {
-            "api_key": LLM.get("Embedding").get("KEY"),
-            "openai_base_url": LLM.get("Embedding").get("URL"),
-            "model": LLM.get("Embedding").get("NAME"),
+            "api_key": LLM.get("Embedding", {}).get("KEY"),
+            "openai_base_url": LLM.get("Embedding", {}).get("URL"),
+            "model": LLM.get("Embedding", {}).get("NAME"),
             "embedding_dims": 3072,
         },
     },

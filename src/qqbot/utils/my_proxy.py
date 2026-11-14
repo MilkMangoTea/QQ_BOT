@@ -42,7 +42,7 @@ system_prompt = config.PROMPT[0] + config.PROMPT[config.CURRENT_PROMPT]
 memory_pool = LocalDictStore()
 memory_manager = MemoryManager(
     timeout=config.HISTORY_TIMEOUT,
-    context_window=30  # 与 MESSAGE_COUNT 保持一致
+    context_window=config.MESSAGE_COUNT  # 只限制首次导入量
 )
 
 # 主接收循环按 echo 唤醒对应请求，避免多个协程同时读取 WebSocket。
@@ -57,12 +57,6 @@ _CHAIN_CACHE = {}
 _BACKGROUND_TASKS = set()
 _MESSAGE_TASKS = set()
 _SESSION_LOCKS = WeakValueDictionary()
-
-def _clear_chain_cache():
-    """清空对话链缓存。"""
-    global _CHAIN_CACHE
-    _CHAIN_CACHE = {}
-
 
 async def send_action_and_wait(websocket, action, params, timeout=10.0):
     """发送 action，并按 echo 等待对应响应。"""
@@ -110,6 +104,7 @@ async def _ai_completion(session_id, user_content, history_msgs):
     """输入会话标识和消息内容，返回生成的文本回复。"""
     try:
         user_id = session_id
+        prompt_context = memory_manager.get_prompt_context(session_id)
 
         if not user_content:
             return _empty_completion()
@@ -150,7 +145,7 @@ async def _ai_completion(session_id, user_content, history_msgs):
             temp_config["NAME"] = names[0]
             llm = create_chat_llm(temp_config)
 
-            async def get_image_description(image_url: str) -> str:
+            async def fetch_image_description(image_url: str) -> str:
                 if image_url in _IMAGE_DESCRIPTION_CACHE:
                     out("💾 使用缓存的图片描述", image_url[:80])
                     return _IMAGE_DESCRIPTION_CACHE[image_url]
@@ -195,30 +190,15 @@ async def _ai_completion(session_id, user_content, history_msgs):
                     out("⚠️ 图片描述失败", str(e))
                     return "[图片识别失败]"
 
-            # 仅识别最近五张图片，避免历史图片无限增加请求与上下文长度。
+            # Freeze even failures for this conversation so old model input never
+            # changes after new images arrive or the global URL cache is evicted.
+            async def get_image_description(image_url):
+                frozen = prompt_context.image_descriptions
+                if image_url not in frozen:
+                    frozen[image_url] = await fetch_image_description(image_url)
+                return frozen[image_url]
+
             described_history = []
-            MAX_IMAGES = 5
-
-            _all_img_urls = []
-            for msg in history_msgs:
-                if isinstance(msg, HumanMessage) and isinstance(msg.content, list):
-                    for part in msg.content:
-                        if isinstance(part, dict) and part.get("type") == "image_url":
-                            u = part.get("image_url", {}).get("url", "")
-                            if u:
-                                _all_img_urls.append(u)
-            for part in user_content:
-                if isinstance(part, dict) and part.get("type") in ("image_url", "image"):
-                    u = part.get("image_url", {}).get("url", "") if part.get("type") == "image_url" else part.get("url", "")
-                    if u:
-                        _all_img_urls.append(u)
-
-            _seen = []
-            for u in _all_img_urls:
-                if u in _seen:
-                    _seen.remove(u)
-                _seen.append(u)
-            keep_urls = set(_seen[-MAX_IMAGES:])
 
             async def describe_parts(parts):
                 result = []
@@ -231,7 +211,7 @@ async def _ai_completion(session_id, user_content, history_msgs):
                         url = (part.get("image_url", {}).get("url", "")
                                if part["type"] == "image_url" else part.get("url", ""))
                         if url:
-                            description = await get_image_description(url) if url in keep_urls else "[过期图片]"
+                            description = await get_image_description(url)
                             result.append(f"[图片内容: {description}]")
                 return "".join(result)
 
@@ -239,7 +219,7 @@ async def _ai_completion(session_id, user_content, history_msgs):
                 if isinstance(msg, HumanMessage) and isinstance(msg.content, list):
                     text = await describe_parts(msg.content)
                     if text.strip():
-                        described_history.append(HumanMessage(content=text))
+                        described_history.append(HumanMessage(content=text, additional_kwargs=msg.additional_kwargs))
                 elif isinstance(msg, (HumanMessage, AIMessage)):
                     described_history.append(msg)
 
@@ -285,7 +265,8 @@ async def _ai_completion(session_id, user_content, history_msgs):
                     emoji_options = get_available_emojis()
                     response = await chain.ainvoke(
                         {"input": [input_msg], "long_memory": long_mem,
-                         "emoji_options": emoji_options, "history": history_msgs},
+                         "emoji_options": emoji_options, "history": history_msgs,
+                         "prompt_context": prompt_context},
                         run_config={"configurable": {"session_id": session_id}},
                     )
                     response_received = True
@@ -312,6 +293,7 @@ async def _ai_completion(session_id, user_content, history_msgs):
                     if not content or "Agent stopped due to" in content:
                         cleanup_rendered_images(rendered_ids)
                         return _empty_completion()
+                    model_content = response.get("model_content", content) if isinstance(response, dict) else content
                     try:
                         content, emoji_name = parse_emoji_reply(content, emoji_options)
                     except ValueError as error:
@@ -319,7 +301,6 @@ async def _ai_completion(session_id, user_content, history_msgs):
                         cleanup_rendered_images(rendered_ids)
                         return _empty_completion()
 
-                    out("短期记忆：", memory_manager.get_or_create_session(session_id).history)
                     out("✅ 使用模型：", model_name)
 
                     return {
@@ -327,6 +308,7 @@ async def _ai_completion(session_id, user_content, history_msgs):
                         "emoji": emoji_name,
                         "rendered_image_ids": rendered_ids,
                         "memory_turn": {"user_id": user_id, "user_text": user_text},
+                        "model_content": model_content,
                     }
 
                 except Exception as e:
@@ -426,6 +408,11 @@ async def remember(websocket, event):
                 history_msgs = messages[-config.MESSAGE_COUNT:] if messages else []
                 await memory_manager.initialize_with_history(
                     session_id, history_msgs, event_context=event)
+            else:
+                # Once live events start accumulating, a later bootstrap must
+                # not overwrite that conversation and its stable model prefix.
+                out("⚠️ 初始历史拉取失败，从本条消息开始保留会话")
+                await memory_manager.initialize_with_history(session_id, [])
 
         message = event_message(event)
         nickname = sender_name(event)
@@ -502,7 +489,12 @@ async def handle_message(websocket, event, user_content):
         if not await send_message(websocket, build_params("segments", event, message_segments)):
             return
 
-        memory_manager.add_ai_message(session_id, content)
+        if event.get("_proactive_reply"):
+            memory_manager.mark_proactive_reply(session_id)
+        memory_manager.add_ai_message(
+            session_id, content,
+            model_content=completion.get("model_content", content) if isinstance(completion, dict) else content,
+        )
         out("💾 AI 回复已加入上下文:", content[:80])
         memory_turn = completion.get("memory_turn") if isinstance(completion, dict) else None
         if memory_turn and content:

@@ -52,15 +52,14 @@ def rep(event, memory_manager):
             or event.get("message_type") == "private"):
         return True
 
-    # 自然语言识别模块已关闭
-    return False
-
-    # try:
-    #     session_id = calc_session_id(event)
-    #     return should_reply_langchain(event, memory_manager, session_id)
-    # except Exception as e:
-    #     out("⚠️ NLP 调用异常", e)
-    #     return False
+    if not config.ENABLE_NATURAL_LANGUAGE_REPLY:
+        return False
+    try:
+        session_id = calc_session_id(event)
+        return should_reply_langchain(event, memory_manager, session_id)
+    except Exception as e:
+        out("⚠️ NLP 调用异常", e)
+        return False
 
 
 _EMOJI_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".webp"}

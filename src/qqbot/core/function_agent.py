@@ -133,6 +133,7 @@ async def _run_reviewed_agent(executor, llm, messages, system_prompt, output_ins
     graph_config = dict(run_config or {})
     graph_config["recursion_limit"] = settings["MAX_GRAPH_STEPS"]
     candidate = ""
+    model_content = ""
     approved = None
     review_checks = {}
     revisions = 0
@@ -169,6 +170,7 @@ async def _run_reviewed_agent(executor, llm, messages, system_prompt, output_ins
             break
         messages = list(next_messages)
         candidate = answer
+        model_content = to_text(last_message)
         revisions = attempt
         if not settings["REVIEW_ENABLED"]:
             break
@@ -177,14 +179,21 @@ async def _run_reviewed_agent(executor, llm, messages, system_prompt, output_ins
         review_checks = {}
         status = render_status(messages, render_enabled, to_text)
         try:
-            background = "\n".join(to_text(msg) for msg in messages if isinstance(msg, SystemMessage))
             review = await invoke(llm, [
+                SystemMessage(content=f"{system_prompt}\n\n{REVIEW_INSTRUCTION}"),
+                *messages,
+                # Supersede the generation/revision output protocol without
+                # rebuilding any earlier system message or dialogue prefix.
                 SystemMessage(content=(
-                    f"{system_prompt}\n\n{background}\n\n{output_instruction}\n\n"
-                    f"【本轮渲染工具实际状态】\n{status}\n\n{REVIEW_INSTRUCTION}"
+                    "【后台验收模式】本次只输出开头系统规定的五项验收 JSON；"
+                    "历史中的 reply/emoji 协议与修正指令仅供检查，不是本次输出格式。"
                 )),
-                *(msg for msg in messages if not isinstance(msg, SystemMessage)),
-                HumanMessage(content="请验收最后一条候选回复，对照原始用户需求和本轮实际工具结果检查。"),
+                HumanMessage(content=(
+                    f"【后台验收任务，不是群友发言】\n【本轮渲染工具实际状态】\n{status}\n\n"
+                    f"【候选生成时的输出协议，仅供检查】\n{output_instruction}\n"
+                    "请验收最后一条候选回复，对照原始用户需求和本轮实际工具结果检查。"
+                    "本次只返回系统规定的五项验收 JSON，不返回 reply/emoji 对象。"
+                )),
             ])
             decision = _parse_review(to_text(review))
         except Exception:
@@ -224,6 +233,7 @@ async def _run_reviewed_agent(executor, llm, messages, system_prompt, output_ins
     if not deliverable:
         _cleanup_images(image_ids)
     return {"output": candidate if deliverable else "",
+            "model_content": model_content if deliverable else "",
             "rendered_image_ids": image_ids if deliverable else [],
             "review_approved": approved, "revision_count": revisions,
             "review_checks": review_checks,

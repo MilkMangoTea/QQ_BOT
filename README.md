@@ -144,22 +144,48 @@ BOT_QQ_ID = 987654321                   # 机器人 QQ 号
 
 ### LLM 配置
 
-```python
-# 当前使用的模型（可选值：DEEPSEEK, ALI, ZHIPU, AIZEX 等）
-CURRENT_COMPLETION = "DEEPSEEK"
+模型、供应商地址、密钥环境变量名以及当前供应商统一在仓库根目录的 `model.toml` 中配置，修改后重启机器人：
 
-# LLM 字典配置（支持自定义模型）
-LLM = {
-    "DEEPSEEK": {
-        "NAME": "deepseek-chat,deepseek-reasoner",  # 支持多模型降级
-        "URL": "https://api.deepseek.com",
-        "KEY": os.getenv("DEEPSEEK")
-    },
-    # ... 更多模型配置
-}
+```toml
+current_completion = "DEEPSEEK"
+
+[providers.DEEPSEEK]
+name = "deepseek-chat,deepseek-reasoner"
+base_url = "https://api.deepseek.com"
+api_key_env = "DEEPSEEK"
+# use_responses_api = true  # 仅支持 Responses API 的提供商开启
 ```
 
-**多模型降级**：在 `NAME` 字段用逗号分隔多个模型名，失败时自动尝试下一个。
+`name` 中逗号分隔的模型按顺序降级。密钥仍写在 `my_env/api_key.env` 或进程环境中，TOML 只保存环境变量名。
+服务器可设置 `QQBOT_MODEL_FILE=/path/to/model.toml` 使用独立配置文件；默认路径相对于仓库定位，不依赖启动目录。
+`providers.Memory` 和 `providers.Embedding` 分别控制 Mem0 的对话模型与向量模型。
+`config.py` 继续提供 `LLM` 和 `CURRENT_COMPLETION` 供现有代码读取，但不再内嵌供应商配置。
+Python 3.11 以下由 `requirements.txt` 中的 `tomli` 解析 TOML。
+
+### 自然语言回复判定
+
+`src/qqbot/config/config.py` 的 `ENABLE_NATURAL_LANGUAGE_REPLY = True` 默认开启普通群消息的模型回复判定。
+设为 `False` 可关闭；被 @、引用机器人、私聊及既有随机触发继续走原有回复流程。群白名单仍生效，主动参与保留五分钟冷却，从 QQ 确认发送成功后计时。
+判定使用当前供应商的第一个候选模型，读取最近 20 条对话作为路由背景，会产生独立模型调用。
+
+### 会话上下文与缓存
+
+新会话仍通过 `MESSAGE_COUNT` 导入固定数量的最近聊天记录，默认 15 条。
+会话存活期间完整累积历史，不再限制为最近 30 条；`HISTORY_TIMEOUT = 3600` 表示闲置一小时才过期，持续活动会延长存活时间。
+过期、手动重置或进程重启后，下次消息重新导入最近历史。首次拉取失败时从当前消息开始累积，本会话内不再重载覆盖已有消息。本次不添加 50% 阈值或自动摘要；持续活跃的长会话仍受供应商的上下文容量限制。
+
+日期使用 Asia/Shanghai 的天级日期；日期、长期记忆或可选表情改变时在模型历史末尾追加背景快照，不改写已有前缀。
+图片描述在会话中固定保存，新增图片或全局图片缓存淘汰不会将旧描述替换为“过期图片”。
+只将验收通过且发送成功的回复存入公开聊天记忆，模型侧另保留原始回复协议；草稿、后台验收任务和修正意见不会跨轮进入历史。
+生成和验收各自保留固定系统提示，验收的实时状态追加在请求末尾。
+关闭 LangChain 的完整回复缓存，避免不断增长的请求在进程中重复保存整份上下文；供应商的前缀缓存照常工作。
+
+离线验证：
+
+```bash
+python tests/test_prompt_cache.py
+python tests/test_model_config.py
+```
 
 ### 联网搜索
 
@@ -172,7 +198,7 @@ LLM = {
 ```python
 DEEPSEEK_SEARCH_CONFIG = {
     "ENABLED": True,        # 默认启用，也可通过下方环境变量关闭
-    "KEY": LLM["DEEPSEEK"]["KEY"],
+    "KEY": LLM.get("DEEPSEEK", {}).get("KEY"),
     "URL": "https://api.deepseek.com/v1/tools/search",
     "TIMEOUT": 15.0,       # 网络请求超时（秒）
     "RESULT_COUNT": 5,     # 返回结果数，接口允许 1 至 50
@@ -292,10 +318,10 @@ RAN_REP_PROBABILITY = 3
 # 将图片放入 fortune_resources/emoji/；模型会自行决定是否发送以及选择哪一张
 
 # 会话记忆超时时间（秒）
-HISTORY_TIMEOUT = 600  # 10 分钟
+HISTORY_TIMEOUT = 3600  # 闲置一小时后过期
 
-# 上下文窗口大小（保留最近 N 轮对话）
-CONTEXT_WINDOW = 15
+# 新会话初始化时导入的历史条数；存活期间不按条数裁剪
+MESSAGE_COUNT = 15
 ```
 
 ### 人格配置
@@ -362,8 +388,8 @@ FORTUNE_GROUPS = []
 ### 🧠 记忆系统
 
 #### 短期会话记忆
-- **存储内容**：最近 15 轮对话（可配置 `CONTEXT_WINDOW`）
-- **超时机制**：10 分钟无互动自动清空（`HISTORY_TIMEOUT`）
+- **存储内容**：首次导入最近 15 条，此后在会话存活期间持续累积（首次导入量由 `MESSAGE_COUNT` 配置）
+- **超时机制**：一小时无互动自动清空（`HISTORY_TIMEOUT`）
 - **Session ID**：基于群组/用户 ID 和消息 ID 生成
 - **实现**：`function_session_memory.py`
 
@@ -473,10 +499,9 @@ async def on_message(data):
 
 ### LLM 降级策略
 
-```python
-# 多模型降级配置
-LLM["DEEPSEEK"]["NAME"] = "deepseek-chat,deepseek-reasoner"
+在 `model.toml` 的对应 `[providers.供应商名]` 中设置 `name = "deepseek-chat,deepseek-reasoner"`。
 
+```python
 # 降级逻辑
 for model_name in names:  # ["deepseek-chat", "deepseek-reasoner"]
     try:
@@ -637,7 +662,7 @@ HTTPX_TIMEOUT = httpx.Timeout(
 )
 
 # 减少上下文窗口大小
-CONTEXT_WINDOW = 10  # 从 15 降低到 10
+MESSAGE_COUNT = 10  # 仅减少首次导入的历史条数，存活期间继续累积
 
 # 禁用长期记忆（如果不需要）
 # 注释掉 function_long_turn_memory.py 中的相关调用
@@ -686,7 +711,7 @@ ZILLIZ_API_KEY="your_zilliz_api_key"
 **调整方法**：
 ```python
 # 在 config.py 中修改超时时间
-HISTORY_TIMEOUT = 1200  # 改为 20 分钟（默认 600 秒）
+HISTORY_TIMEOUT = 7200  # 改为闲置两小时过期（默认 3600 秒）
 ```
 
 ---
@@ -717,19 +742,14 @@ CURRENT_PROMPT = 3
 MY_NEW_LLM_KEY="sk-xxxxx"
 ```
 
-2. 在 `config.py` 中添加 LLM 配置
-```python
-LLM = {
-    # ... 现有配置
-    "MY_NEW_LLM": {
-        "NAME": "my-model-name",  # 或 "model-1,model-2" 支持降级
-        "URL": "https://api.example.com",  # API 端点
-        "KEY": os.getenv("MY_NEW_LLM_KEY")
-    }
-}
+2. 在 `model.toml` 中添加供应商，并修改文件顶部的 `current_completion`：
+```toml
+current_completion = "MY_NEW_LLM"
 
-# 设置为当前使用的模型
-CURRENT_COMPLETION = "MY_NEW_LLM"
+[providers.MY_NEW_LLM]
+name = "model-1,model-2"
+base_url = "https://api.example.com/v1"
+api_key_env = "MY_NEW_LLM_KEY"
 ```
 
 3. 如果 API 格式不兼容 OpenAI，需要修改 `function.py` 中的 `ai_completion()` 函数
