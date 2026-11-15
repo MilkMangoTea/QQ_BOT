@@ -16,7 +16,6 @@ class PromptContext:
     source_keys: list = field(default_factory=list)
     messages: list = field(default_factory=list)
     runtime_context: str = ""
-    image_descriptions: dict = field(default_factory=dict)
 
     def prepare(self, history, current, runtime_context):
         source = [*history, current]

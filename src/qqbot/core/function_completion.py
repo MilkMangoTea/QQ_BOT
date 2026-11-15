@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -174,6 +175,23 @@ def lc_content_to_text(content) -> str:
 
 def lc_message_to_text(msg) -> str:
     return lc_content_to_text(getattr(msg, "content", msg))
+
+
+def _conversation_content(messages):
+    """Keep image blocks intact, while retaining the existing text-only format."""
+    parts = []
+    for index, message in enumerate(messages):
+        if index:
+            parts.append({"type": "text", "text": "\n"})
+        content = message.content
+        if isinstance(content, list):
+            parts.extend(deepcopy(content))
+        else:
+            parts.append({"type": "text", "text": content})
+    if any(isinstance(part, dict) and part.get("type") in {"image_url", "image", "input_image"}
+           for part in parts):
+        return parts
+    return "\n".join(lc_message_to_text(message) for message in messages)
 
 
 def emoji_reply_instruction(emoji_options) -> str:
@@ -580,15 +598,10 @@ def get_long_memory_text(long_memory_pool, user_id, query):
 def create_agent_chain_with_memory(memory_manager, long_memory_pool, system_prompt, llm_config, tools):
     """从第一轮就使用人格，在保留工具证据的同一对话中验收、修正。"""
     agent_tools = list(tools or [])
-    responses_mode = bool(llm_config.get("USE_RESPONSES_API"))
-    if responses_mode:
-        out("Responses API 当前使用无工具模式，仍启用人格验收")
-        agent_tools = []
-    else:
-        search_config = config.DEEPSEEK_SEARCH_CONFIG
-        has_search = any(getattr(t, "name", None) == "deepseek_search" for t in agent_tools)
-        if search_config["ENABLED"] and search_config.get("KEY") and not has_search:
-            agent_tools.append(create_deepseek_search_tool(search_config))
+    search_config = config.DEEPSEEK_SEARCH_CONFIG
+    has_search = any(getattr(t, "name", None) == "deepseek_search" for t in agent_tools)
+    if search_config["ENABLED"] and search_config.get("KEY") and not has_search:
+        agent_tools.append(create_deepseek_search_tool(search_config))
     search_enabled = any(getattr(t, "name", None) == "deepseek_search" for t in agent_tools)
     render_enabled = any(getattr(t, "name", None) == "render_to_png" for t in agent_tools)
 
@@ -628,7 +641,7 @@ emoji 只能为 null 或最近后台背景中列出的一个完整文件名；�
     agent_system_message += f"\n本轮联网搜索工具：{'可用' if search_enabled else '不可用'}"
 
     llm = create_chat_llm(llm_config)
-    agent_executor = None if responses_mode else create_react_agent(
+    agent_executor = create_react_agent(
         llm, agent_tools, prompt=agent_system_message,
     )
 
@@ -647,13 +660,13 @@ emoji 只能为 null 或最近后台背景中列出的一个完整文件名；�
             else:
                 history_msgs = list(memory_manager.get_history(session_id).messages) if session_id else []
             input_msgs = inputs.get("input", [])
-            input_text = "\n".join(lc_message_to_text(msg) for msg in input_msgs)
+            input_content = _conversation_content(input_msgs)
             # Preserve dialogue roles; the current message may already be stored by the receiver.
             if (history_msgs and isinstance(history_msgs[-1], HumanMessage)
-                    and lc_message_to_text(history_msgs[-1]) == input_text):
+                    and _conversation_content([history_msgs[-1]]) == input_content):
                 history_msgs.pop()
             history = [
-                HumanMessage(content=lc_message_to_text(msg)) if isinstance(msg, HumanMessage)
+                HumanMessage(content=_conversation_content([msg])) if isinstance(msg, HumanMessage)
                 else AIMessage(content=msg.additional_kwargs.get("model_content", lc_message_to_text(msg)))
                 for msg in history_msgs
             ]
@@ -667,7 +680,7 @@ emoji 只能为 null 或最近后台背景中列出的一个完整文件名；�
             context = inputs.get("prompt_context")
             if context is None:
                 context = memory_manager.get_prompt_context(session_id) if session_id else PromptContext()
-            messages = context.prepare(history, HumanMessage(content=input_text), runtime_context)
+            messages = context.prepare(history, HumanMessage(content=input_content), runtime_context)
             return await run_reviewed_agent(
                 agent_executor, llm, messages, agent_system_message, output_instruction,
                 dict(config.AGENT_CONFIG), render_enabled, lc_message_to_text, run_config, async_mode,

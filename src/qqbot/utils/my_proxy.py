@@ -6,7 +6,7 @@ import uuid
 from weakref import WeakValueDictionary
 
 import websockets
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 
 from src.qqbot.config import config
 from src.qqbot.config.config import FORTUNE_GROUPS
@@ -21,7 +21,6 @@ from src.qqbot.core.function import (
     rep,
 )
 from src.qqbot.core.function_completion import (
-    create_chat_llm,
     create_agent_chain_with_memory,
     get_long_memory_text,
     lc_message_to_text,
@@ -47,10 +46,6 @@ memory_manager = MemoryManager(
 
 # 主接收循环按 echo 唤醒对应请求，避免多个协程同时读取 WebSocket。
 _pending_actions = {}  # {echo_id: asyncio.Future}
-
-# 图片描述结果按 URL 缓存，限制容量以控制内存和视觉模型调用次数。
-_IMAGE_DESCRIPTION_CACHE = {}
-_IMAGE_DESCRIPTION_CACHE_MAX_SIZE = 200
 
 # 对话链按模型缓存；后台任务集合保证记忆写入任务持续到完成。
 _CHAIN_CACHE = {}
@@ -88,7 +83,7 @@ def _empty_completion():
 
 
 async def ai_completion(session_id, user_content):
-    """Apply one total deadline to memory lookup, image description and all agent attempts."""
+    """Apply one total deadline to memory lookup and all agent attempts."""
     history = list(memory_manager.get_history(session_id).messages)
     try:
         return await asyncio.wait_for(
@@ -127,109 +122,6 @@ async def _ai_completion(session_id, user_content, history_msgs):
 
         out("🏁 [ai_completion] 调用 chain, session:", session_id)
         out("📝 [ai_completion] 用户输入:", str(user_content)[:100])
-
-        # 工具链只接收文本，因此图片消息需要先转换为描述。
-        has_image = any(isinstance(p, dict) and p.get("type") in ["image_url", "image"] for p in user_content)
-
-        if not has_image:
-            for msg in history_msgs:
-                if hasattr(msg, 'content') and isinstance(msg.content, list):
-                    if any(isinstance(p, dict) and p.get("type") == "image_url" for p in msg.content):
-                        has_image = True
-                        out("🖼️ 检测到历史消息中有图片", "生成图片描述")
-                        break
-
-        if has_image:
-            names = [s.strip() for s in str(LLM_NAME).split(",") if s.strip()]
-            temp_config = CURRENT_LLM.copy()
-            temp_config["NAME"] = names[0]
-            llm = create_chat_llm(temp_config)
-
-            async def fetch_image_description(image_url: str) -> str:
-                if image_url in _IMAGE_DESCRIPTION_CACHE:
-                    out("💾 使用缓存的图片描述", image_url[:80])
-                    return _IMAGE_DESCRIPTION_CACHE[image_url]
-
-                if len(_IMAGE_DESCRIPTION_CACHE) >= _IMAGE_DESCRIPTION_CACHE_MAX_SIZE:
-                    keys_to_remove = list(_IMAGE_DESCRIPTION_CACHE.keys())[:_IMAGE_DESCRIPTION_CACHE_MAX_SIZE // 2]
-                    for key in keys_to_remove:
-                        del _IMAGE_DESCRIPTION_CACHE[key]
-                    out("🧹 图片描述缓存已清理", f"删除 {len(keys_to_remove)} 条旧记录")
-
-                try:
-                    if CURRENT_LLM.get("USE_RESPONSES_API"):
-                        desc_response = await asyncio.wait_for(
-                            llm.ainvoke(
-                                [HumanMessage(content=[
-                                    {"type": "text", "text": config.IMAGE_DESCRIPTION_PROMPT},
-                                    {"type": "image_url", "image_url": {"url": image_url}}
-                                ])]
-                            ),
-                            timeout=30.0
-                        )
-                    else:
-                        desc_response = await asyncio.wait_for(
-                            llm.ainvoke(
-                                [
-                                    SystemMessage(content=config.IMAGE_DESCRIPTION_PROMPT),
-                                    HumanMessage(content=[{"type": "image_url", "image_url": {"url": image_url}}])
-                                ]
-                            ),
-                            timeout=30.0
-                        )
-                    description = lc_message_to_text(desc_response).strip()
-
-                    _IMAGE_DESCRIPTION_CACHE[image_url] = description
-                    out("🖼️ 新图片描述生成", description[:100])
-
-                    return description
-
-                except asyncio.TimeoutError:
-                    return "[图片识别超时]"
-                except Exception as e:
-                    out("⚠️ 图片描述失败", str(e))
-                    return "[图片识别失败]"
-
-            # Freeze even failures for this conversation so old model input never
-            # changes after new images arrive or the global URL cache is evicted.
-            async def get_image_description(image_url):
-                frozen = prompt_context.image_descriptions
-                if image_url not in frozen:
-                    frozen[image_url] = await fetch_image_description(image_url)
-                return frozen[image_url]
-
-            described_history = []
-
-            async def describe_parts(parts):
-                result = []
-                for part in parts:
-                    if not isinstance(part, dict):
-                        continue
-                    if part.get("type") == "text":
-                        result.append(part.get("text", ""))
-                    elif part.get("type") in ("image_url", "image"):
-                        url = (part.get("image_url", {}).get("url", "")
-                               if part["type"] == "image_url" else part.get("url", ""))
-                        if url:
-                            description = await get_image_description(url)
-                            result.append(f"[图片内容: {description}]")
-                return "".join(result)
-
-            for msg in history_msgs:
-                if isinstance(msg, HumanMessage) and isinstance(msg.content, list):
-                    text = await describe_parts(msg.content)
-                    if text.strip():
-                        described_history.append(HumanMessage(content=text, additional_kwargs=msg.additional_kwargs))
-                elif isinstance(msg, (HumanMessage, AIMessage)):
-                    described_history.append(msg)
-
-            combined_text = await describe_parts(user_content)
-
-            user_content = [{"type": "text", "text": combined_text}]
-
-            # Descriptions belong only to this turn's snapshot. Never pop or
-            # rewrite the shared history after awaiting remote image work.
-            history_msgs = described_history
 
         # 依次尝试配置中的候选模型。
         names = [s.strip() for s in str(LLM_NAME).split(",") if s.strip()]
