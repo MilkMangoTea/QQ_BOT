@@ -1,8 +1,11 @@
 """Bounded reply review that preserves the agent's tool evidence across revisions."""
 
+import asyncio
 import json
 import traceback
 
+import httpx
+from openai import APIConnectionError, APIStatusError
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.callbacks.manager import CallbackManager
@@ -44,6 +47,13 @@ REVIEW_CHECKS = {
     "completeness": "完成度与事实",
     "format": "格式",
 }
+
+
+def _is_retryable_review_error(error):
+    if isinstance(error, (APIConnectionError, httpx.TransportError, TimeoutError, asyncio.TimeoutError)):
+        return True
+    return (isinstance(error, APIStatusError)
+            and (error.status_code in (408, 409, 429) or error.status_code >= 500))
 
 
 def _parse_review(content):
@@ -178,27 +188,41 @@ async def _run_reviewed_agent(executor, llm, messages, system_prompt, output_ins
         approved = None
         review_checks = {}
         status = render_status(messages, render_enabled, to_text)
-        try:
-            review = await invoke(llm, [
-                SystemMessage(content=f"{system_prompt}\n\n{REVIEW_INSTRUCTION}"),
-                *messages,
-                # Supersede the generation/revision output protocol without
-                # rebuilding any earlier system message or dialogue prefix.
-                SystemMessage(content=(
-                    "【后台验收模式】本次只输出开头系统规定的五项验收 JSON；"
-                    "历史中的 reply/emoji 协议与修正指令仅供检查，不是本次输出格式。"
-                )),
-                HumanMessage(content=(
-                    f"【后台验收任务，不是群友发言】\n【本轮渲染工具实际状态】\n{status}\n\n"
-                    f"【候选生成时的输出协议，仅供检查】\n{output_instruction}\n"
-                    "请验收最后一条候选回复，对照原始用户需求和本轮实际工具结果检查。"
-                    "本次只返回系统规定的五项验收 JSON，不返回 reply/emoji 对象。"
-                )),
-            ])
-            decision = _parse_review(to_text(review))
-        except Exception:
-            out("⚠️ 后台验收调用失败", traceback.format_exc())
-            decision = None
+        review_messages = [
+            SystemMessage(content=f"{system_prompt}\n\n{REVIEW_INSTRUCTION}"),
+            *messages,
+            # Supersede the generation/revision output protocol without
+            # rebuilding any earlier system message or dialogue prefix.
+            SystemMessage(content=(
+                "【后台验收模式】本次只输出开头系统规定的五项验收 JSON；"
+                "历史中的 reply/emoji 协议与修正指令仅供检查，不是本次输出格式。"
+            )),
+            HumanMessage(content=(
+                f"【后台验收任务，不是群友发言】\n【本轮渲染工具实际状态】\n{status}\n\n"
+                f"【候选生成时的输出协议，仅供检查】\n{output_instruction}\n"
+                "请验收最后一条候选回复，对照原始用户需求和本轮实际工具结果检查。"
+                "本次只返回系统规定的五项验收 JSON，不返回 reply/emoji 对象。"
+            )),
+        ]
+        decision = None
+        max_review_retries = settings.get("REVIEW_MAX_RETRIES", 2)
+        for review_attempt in range(max_review_retries + 1):
+            try:
+                review = await invoke(llm, review_messages)
+                decision = _parse_review(to_text(review))
+            except Exception as error:
+                out(f"⚠️ 后台验收调用失败（第 {review_attempt + 1}/{max_review_retries + 1} 次）",
+                    traceback.format_exc())
+                if (review_attempt == max_review_retries
+                        or not _is_retryable_review_error(error)):
+                    break
+                delay = settings.get("REVIEW_RETRY_DELAY", 1.0) * (2 ** review_attempt)
+                out("🔄 后台验收准备重试",
+                    f"第 {review_attempt + 2}/{max_review_retries + 1} 次调用，等待 {delay:g} 秒")
+                # Retry only this review: never regenerate the draft or rerun tools.
+                await asyncio.sleep(delay)
+                continue
+            break
         if decision is None:
             review_status = "review_failed"
             out("⚠️ 后台验收不可用，禁止发送未通过的候选")

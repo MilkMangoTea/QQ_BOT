@@ -191,6 +191,8 @@ DEEPSEEK_SEARCH_CONFIG = {
 # 初稿即使用人格提示；验收不通过时保留工具结果继续修正。
 AGENT_CONFIG = {
     "REVIEW_ENABLED": True,
+    "REVIEW_MAX_RETRIES": 2,  # 验收请求遇到暂时性网络/API 错误时额外重试次数
+    "REVIEW_RETRY_DELAY": 1.0,  # 验收重试初始等待秒数，后续按 2 倍递增
     "MAX_REVISIONS": 2,       # 最多修正两次；通过验收则提前结束
     "MAX_GRAPH_STEPS": 32,    # 每次生成的 LangGraph 步数上限，含模型和工具节点
     "TURN_TIMEOUT": 180.0,    # 完整生成、工具调用及验收的总限时（秒）
