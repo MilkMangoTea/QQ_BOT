@@ -1,0 +1,276 @@
+import asyncio
+import base64
+import io
+import os
+from pathlib import Path
+from typing import Optional, Union
+
+import httpx
+from PIL import Image
+
+from src.qqbot.utils.console import out
+
+# 全局 URL 上传缓存：{原始URL: CDN URL}
+# 避免重复上传同一张图片（特别是历史消息中的图片）
+_url_upload_cache = {}
+
+
+def to_onebot_image_file(source):
+    """Convert model-style data URIs to OneBot's base64:// image format."""
+    if not isinstance(source, str) or not source or source == "base64://error":
+        return None
+    if source.startswith("data:image/"):
+        header, separator, encoded = source.partition(",")
+        return f"base64://{encoded}" if separator and header.endswith(";base64") and encoded else None
+    return source
+
+
+async def upload_image_bytes_to_worker(
+    image_data: bytes,
+    filename: Optional[str] = None
+) -> Optional[str]:
+    """
+    上传字节流图片到 Cloudflare Worker
+
+    Args:
+        image_data: Raw image bytes
+        filename: Optional filename (not used currently)
+
+    Returns:
+        Uploaded image URL, or None if failed
+    """
+    worker_url = os.getenv("WORKER_URL")
+    worker_api_key = os.getenv("API_KEY")
+
+    if not worker_url or not worker_api_key:
+        return None
+
+    try:
+        # 转换为 base64 数据 URI
+        b64_data = base64.b64encode(image_data).decode('utf-8')
+
+        if image_data.startswith(b'\x89PNG\r\n\x1a\n'):
+            mime_type = 'image/png'
+        elif image_data.startswith(b'\xff\xd8\xff'):
+            mime_type = 'image/jpeg'
+        elif image_data[:6] in (b'GIF87a', b'GIF89a'):
+            mime_type = 'image/gif'
+        elif image_data.startswith(b'RIFF') and image_data[8:12] == b'WEBP':
+            mime_type = 'image/webp'
+        else:
+            mime_type = 'image/png'
+
+        data_uri = f"data:{mime_type};base64,{b64_data}"
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                worker_url,
+                json={"url": data_uri},
+                headers={"Authorization": f"Bearer {worker_api_key}"}
+            )
+            response.raise_for_status()
+
+            result = response.json()
+            if result.get("success"):
+                out("✅ Worker 图片上传成功", result.get("url"))
+                return result.get("url")
+            else:
+                out("⚠️ Worker 图片上传失败", result)
+                return None
+
+    except httpx.TimeoutException:
+        out("⚠️ Worker 图片上传超时")
+        return None
+    except httpx.HTTPStatusError as e:
+        out("⚠️ Worker HTTP 错误", e.response.status_code)
+        return None
+    except Exception as e:
+        out("⚠️ Worker 图片上传异常", e)
+        return None
+
+
+async def upload_image_url_to_worker(image_url: str) -> Optional[str]:
+    """
+    上传图片 url 到 Cloudflare Worker（带缓存）
+
+    Args:
+        image_url: Source image URL (http/https or data URI)
+
+    Returns:
+        Uploaded image CDN URL, or None if failed
+    """
+    # 检查缓存，避免重复上传
+    if image_url in _url_upload_cache:
+        cached_url = _url_upload_cache[image_url]
+        out("🔄 使用图片缓存", f"{image_url[:50]}... -> {cached_url[:50]}...")
+        return cached_url
+
+    worker_url = os.getenv("WORKER_URL")
+    worker_api_key = os.getenv("API_KEY")
+
+    if not worker_url or not worker_api_key:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                worker_url,
+                json={"url": image_url},
+                headers={"Authorization": f"Bearer {worker_api_key}"}
+            )
+            response.raise_for_status()
+
+            result = response.json()
+            if result.get("success"):
+                cdn_url = result.get("url")
+                out("✅ Worker URL 上传成功", cdn_url)
+
+                _url_upload_cache[image_url] = cdn_url
+                return cdn_url
+            else:
+                out("⚠️ Worker URL 上传失败", result)
+                return None
+
+    except httpx.TimeoutException:
+        out("⚠️ Worker URL 上传超时")
+        return None
+    except httpx.HTTPStatusError as e:
+        out("⚠️ Worker HTTP 错误", e.response.status_code)
+        return None
+    except Exception as e:
+        out("⚠️ Worker URL 上传异常", e)
+        return None
+
+
+def bytes_to_base64_uri(image_data: bytes) -> str:
+    """
+    转换为模型可读的 base64 数据 URI（标准格式）
+    Args:
+        image_data: Raw image bytes
+
+    Returns:
+        "data:image/...;base64,..." formatted string (OpenAI compatible)
+    """
+    b64_data = base64.b64encode(image_data).decode('utf-8')
+
+    # 检测 MIME 类型
+    if image_data.startswith(b'\x89PNG\r\n\x1a\n'):
+        mime_type = 'image/png'
+    elif image_data.startswith(b'\xff\xd8\xff'):
+        mime_type = 'image/jpeg'
+    elif image_data[:6] in (b'GIF87a', b'GIF89a'):
+        mime_type = 'image/gif'
+    elif image_data.startswith(b'RIFF') and image_data[8:12] == b'WEBP':
+        mime_type = 'image/webp'
+    else:
+        mime_type = 'image/png'
+
+    return f"data:{mime_type};base64,{b64_data}"
+
+
+def _validated_model_image_uri(image_bytes: bytes) -> str:
+    with Image.open(io.BytesIO(image_bytes)) as image:
+        if image.format not in {"PNG", "JPEG", "GIF", "WEBP"}:
+            raise ValueError("不支持的图片格式")
+        image.verify()
+    # Some formats only detect truncated pixel data during decoding.
+    with Image.open(io.BytesIO(image_bytes)) as image:
+        image.load()
+    return bytes_to_base64_uri(image_bytes)
+
+
+async def load_model_image(image_source: str) -> str:
+    """Snapshot validated input images so stored history has no expiring URLs.
+
+    Raise on unavailable or invalid images; the message parser preserves their
+    summary and surrounding text without sending a broken image to the model.
+    """
+    if image_source.startswith("data:image/"):
+        header, separator, encoded = image_source.partition(",")
+        if not separator or not header.endswith(";base64"):
+            raise ValueError("图片 data URI 格式无效")
+        image_bytes = base64.b64decode(encoded, validate=True)
+    elif image_source.startswith(("http://", "https://")):
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            try:
+                response = await client.get(image_source, headers={"User-Agent": "Mozilla/5.0"})
+                response.raise_for_status()
+            except httpx.HTTPError:
+                # Retain the configured Worker's ability to fetch QQ images
+                # that the bot host cannot access, then snapshot its result too.
+                uploaded_url = await upload_image_url_to_worker(image_source)
+                if not uploaded_url:
+                    raise
+                response = await client.get(uploaded_url, headers={"User-Agent": "Mozilla/5.0"})
+                response.raise_for_status()
+            image_bytes = response.content
+    else:
+        raise ValueError("图片来源必须为 HTTP URL 或 data URI")
+
+    return await asyncio.to_thread(_validated_model_image_uri, image_bytes)
+
+
+async def get_image_url_or_fallback(
+    image_source: Union[bytes, str, Path]
+) -> str:
+    """
+    全局图片处理器，上传至 Worker，失败则回退到 base64
+    允许多种输入:
+    - bytes: Direct upload to Worker, fallback to base64
+    - str (URL): Upload via Worker proxy, fallback to base64 (download first)
+    - Path: Read file and upload to Worker, fallback to base64
+
+    Args:
+        image_source: bytes (raw image), str (URL), or Path (local file)
+
+    Returns:
+        Either "https://..." (Worker CDN URL) or "base64://..." (fallback)
+    """
+    image_bytes = None
+
+    if isinstance(image_source, bytes):
+        image_bytes = image_source
+    elif isinstance(image_source, Path):
+        with open(image_source, 'rb') as f:
+            image_bytes = f.read()
+    elif isinstance(image_source, str):
+        # URL
+        if image_source.startswith(('http://', 'https://')):
+            uploaded_url = await upload_image_url_to_worker(image_source)
+            if uploaded_url:
+                return uploaded_url
+
+            try:
+                out("⚠️ Worker 上传失败，改用图片数据")
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.get(
+                        image_source,
+                        headers={
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                        },
+                        follow_redirects=True
+                    )
+                    response.raise_for_status()
+                    image_bytes = response.content
+            except Exception as e:
+                out("⚠️ 下载图片失败", e)
+                return "base64://error"
+        else:
+            try:
+                with open(image_source, 'rb') as f:
+                    image_bytes = f.read()
+            except Exception as e:
+                out("⚠️ 读取图片文件失败", e)
+                return "base64://error"
+
+    # 使用 base64 上传到 Worker
+    if image_bytes:
+        uploaded_url = await upload_image_bytes_to_worker(image_bytes)
+        if uploaded_url:
+            return uploaded_url
+
+        out("⚠️ 使用图片数据发送")
+        return bytes_to_base64_uri(image_bytes)
+
+    # 所有措施均失效
+    return "base64://error"

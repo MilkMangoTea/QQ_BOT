@@ -1,14 +1,46 @@
 my_env
-test.py
+tests/test.py
 NapCatInstaller.app
 requirements
-__pycache__
-.idea
 .venv
+# Local debugging scripts and offline checks
+/scripts/prompt_playground.py
+/tests/*
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+.idea_modules/
+
+# macOS
+.DS_Store
+
+# Config files
 *.json
 *.sh
-*.json
+tests/yuri_note.txt
+AGENTS.md
+
+# Python 虚拟环境
+venv/
+my_env/
+
+# Python 缓存
+__pycache__/
 *.pyc
-*.sh
-yuri_note.txt
+
+# 环境变量和密钥
+.env
+.env.*
+!.env.example

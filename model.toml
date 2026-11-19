@@ -1,0 +1,44 @@
+# 修改供应商或降级顺序后重启机器人。密钥只填环境变量名，不填实际密钥。
+# 可用 QQBOT_MODEL_FILE 指向服务器上的独立配置文件。
+current_completion = "FREE"
+
+[providers."DEEPSEEK"]
+name = "deepseek-flash"
+base_url = "https://api.deepseek.com"
+api_key_env = "DEEPSEEK"
+
+[providers."ZHIPU"]
+name = "glm-4.5-flash"
+base_url = "https://open.bigmodel.cn/api/paas/v4/"
+api_key_env = "ZHIPU"
+
+[providers."ALI"]
+name = "qwen2.5-vl-72b-instruct"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+api_key_env = "ALI"
+
+[providers."ALI-MAX"]
+name = "qwen-plus"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+api_key_env = "ALI"
+
+[providers."AIZEX"]
+name = "gpt-4.1,gpt-5,gpt-4.1-mini,claude-4-sonnet"
+base_url = "https://a1.aizex.me/v1"
+api_key_env = "AIZEX"
+
+[providers."Embedding"]
+name = "text-embedding-3-large"
+base_url = "https://a1.aizex.me/v1"
+api_key_env = "AIZEX"
+
+[providers."FREE"]
+name = "deepseek-v4.1-flash,gpt-6-luna,deepseek-v4-pro"
+base_url = "https://ai.11451418.xyz/v1"
+api_key_env = "FREE"
+
+# Mem0 使用的独立模型。
+[providers.Memory]
+name = "gpt-4o-mini"
+base_url = "https://a1.aizex.me/v1"
+api_key_env = "AIZEX"
