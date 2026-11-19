@@ -1,9 +1,12 @@
+import asyncio
 import base64
+import io
 import os
 from pathlib import Path
 from typing import Optional, Union
 
 import httpx
+from PIL import Image
 
 from src.qqbot.utils.console import out
 
@@ -165,6 +168,48 @@ def bytes_to_base64_uri(image_data: bytes) -> str:
     return f"data:{mime_type};base64,{b64_data}"
 
 
+def _validated_model_image_uri(image_bytes: bytes) -> str:
+    with Image.open(io.BytesIO(image_bytes)) as image:
+        if image.format not in {"PNG", "JPEG", "GIF", "WEBP"}:
+            raise ValueError("不支持的图片格式")
+        image.verify()
+    # Some formats only detect truncated pixel data during decoding.
+    with Image.open(io.BytesIO(image_bytes)) as image:
+        image.load()
+    return bytes_to_base64_uri(image_bytes)
+
+
+async def load_model_image(image_source: str) -> str:
+    """Snapshot validated input images so stored history has no expiring URLs.
+
+    Raise on unavailable or invalid images; the message parser preserves their
+    summary and surrounding text without sending a broken image to the model.
+    """
+    if image_source.startswith("data:image/"):
+        header, separator, encoded = image_source.partition(",")
+        if not separator or not header.endswith(";base64"):
+            raise ValueError("图片 data URI 格式无效")
+        image_bytes = base64.b64decode(encoded, validate=True)
+    elif image_source.startswith(("http://", "https://")):
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            try:
+                response = await client.get(image_source, headers={"User-Agent": "Mozilla/5.0"})
+                response.raise_for_status()
+            except httpx.HTTPError:
+                # Retain the configured Worker's ability to fetch QQ images
+                # that the bot host cannot access, then snapshot its result too.
+                uploaded_url = await upload_image_url_to_worker(image_source)
+                if not uploaded_url:
+                    raise
+                response = await client.get(uploaded_url, headers={"User-Agent": "Mozilla/5.0"})
+                response.raise_for_status()
+            image_bytes = response.content
+    else:
+        raise ValueError("图片来源必须为 HTTP URL 或 data URI")
+
+    return await asyncio.to_thread(_validated_model_image_uri, image_bytes)
+
+
 async def get_image_url_or_fallback(
     image_source: Union[bytes, str, Path]
 ) -> str:
@@ -209,7 +254,7 @@ async def get_image_url_or_fallback(
                     image_bytes = response.content
             except Exception as e:
                 out("⚠️ 下载图片失败", e)
-                return image_source
+                return "base64://error"
         else:
             try:
                 with open(image_source, 'rb') as f:

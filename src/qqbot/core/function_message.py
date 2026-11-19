@@ -9,7 +9,7 @@ import json
 import re
 import xml.etree.ElementTree as ET
 
-from src.qqbot.utils.image_uploader import get_image_url_or_fallback
+from src.qqbot.utils.image_uploader import load_model_image
 from src.qqbot.utils.console import out
 
 
@@ -153,7 +153,7 @@ class QQMessageParser:
         self.self_user_id = str(self_user_id)
         self.action = action
         self.lookup = lookup
-        self.image_loader = image_loader or get_image_url_or_fallback
+        self.image_loader = image_loader or load_model_image
         self.quote_chars = quote_chars
         self._resolved = {}
         self._lookups_left = 6
@@ -262,7 +262,7 @@ class QQMessageParser:
         try:
             if source.startswith("base64://"):
                 source = "data:image/png;base64," + source[len("base64://"):]
-            image = source if source.startswith("data:image/") else await asyncio.wait_for(self.image_loader(source), 15)
+            image = await asyncio.wait_for(self.image_loader(source), 15)
             if image and image != "base64://error":
                 parts.append({"type": "image_url", "image_url": {"url": image}})
             else:
