@@ -37,6 +37,7 @@ from langgraph.prebuilt import create_react_agent
 from src.qqbot.core.function_tools import create_deepseek_search_tool
 from src.qqbot.core.function_agent import run_reviewed_agent
 from src.qqbot.core.function_session_memory import PromptContext
+from src.qqbot.utils.api_debug import log_async_request, log_async_response, log_request, log_response
 
 
 _IMG_TYPES = {"image", "img", "photo", "picture", "sticker"}
@@ -103,13 +104,24 @@ def clean_openai_headers(request: httpx.Request):
             del request.headers[key]
     request.headers["User-Agent"] = "Mozilla/5.0"
 
+
+async def clean_openai_headers_async(request: httpx.Request):
+    clean_openai_headers(request)
+
+
 HTTPX_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=20.0)
 HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=10.0)
 HTTP_CLIENT = httpx.Client(
     limits=HTTPX_LIMITS,
     timeout=HTTPX_TIMEOUT,
     http2=True,
-    event_hooks={"request": [clean_openai_headers]}
+    event_hooks={"request": [clean_openai_headers, log_request], "response": [log_response]},
+)
+HTTP_ASYNC_CLIENT = httpx.AsyncClient(
+    limits=HTTPX_LIMITS,
+    timeout=HTTPX_TIMEOUT,
+    http2=True,
+    event_hooks={"request": [clean_openai_headers_async, log_async_request], "response": [log_async_response]},
 )
 
 # 模型配置
@@ -433,6 +445,7 @@ def create_chat_llm(llm_config, system_instructions=None):
         "timeout": 60.0,
         "max_retries": 0,
         "http_client": HTTP_CLIENT,
+        "http_async_client": HTTP_ASYNC_CLIENT,
         "cache": False,  # Provider prefix caching is independent of full-response caching.
     }
     if llm_config.get("USE_RESPONSES_API"):
@@ -458,6 +471,7 @@ def _make_llm():
         "timeout": 12,
         "max_retries": 2,
         "http_client": HTTP_CLIENT,
+        "http_async_client": HTTP_ASYNC_CLIENT,
         "cache": False,
     }
     if _CURRENT_LLM.get("USE_RESPONSES_API"):

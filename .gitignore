@@ -6,6 +6,7 @@ requirements
 # Local debugging scripts and offline checks
 /scripts/prompt_playground.py
 /tests/*
+/logs/
 
 # Python
 __pycache__/
