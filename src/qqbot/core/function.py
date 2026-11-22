@@ -24,6 +24,36 @@ def build_params_text_only(event, content):
     return {**base, "message_type": msg_type, key: event[key]}
 
 
+def build_poke_params(event, target_id):
+    """Build NapCat's send_poke parameters for the current conversation."""
+    target_id = str(target_id)
+    if event.get("message_type") == "group":
+        return {"group_id": event["group_id"], "target_id": target_id}
+    return {"user_id": event["user_id"], "target_id": target_id}
+
+
+def build_reply_action_context(event):
+    """Expose only QQ IDs present in the current event to the model."""
+    allowed = set()
+    sender = event.get("sender") if isinstance(event.get("sender"), dict) else {}
+    sender_id = sender.get("user_id", event.get("user_id"))
+    for value in (event.get("user_id"), sender_id, config.SELF_USER_ID):
+        if value is not None:
+            allowed.add(str(value))
+    for segment in normalize_message(event_message(event)):
+        if segment.get("type") != "at":
+            continue
+        qq = (segment.get("data") or {}).get("qq")
+        if qq is not None:
+            allowed.add(str(qq))
+    return {
+        "message_type": event.get("message_type"),
+        "sender_id": str(sender_id) if sender_id is not None else None,
+        "bot_id": str(config.SELF_USER_ID),
+        "allowed_qq": sorted(allowed),
+    }
+
+
 # 随机回复
 def ran_rep():
     return random.randint(1, 100) <= config.RAN_REP_PROBABILITY

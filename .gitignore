@@ -45,4 +45,5 @@ __pycache__/
 .env.*
 !.env.example
 CLAUDE.md
+CODEX.md
 tests

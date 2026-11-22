@@ -15,6 +15,8 @@ from src.qqbot.core.function import (
     build_emoji_params,
     get_available_emojis,
     build_params_text_only,
+    build_poke_params,
+    build_reply_action_context,
     process_single_message,
     ran_rep_text_only,
     is_allowed_group,
@@ -79,15 +81,15 @@ async def send_action_and_wait(websocket, action, params, timeout=10.0):
 
 
 def _empty_completion():
-    return {"text": "", "emoji": None, "rendered_image_ids": []}
+    return {"text": "", "emoji": None, "actions": [], "rendered_image_ids": []}
 
 
-async def ai_completion(session_id, user_content):
+async def ai_completion(session_id, user_content, event=None):
     """Apply one total deadline to memory lookup and all agent attempts."""
     history = list(memory_manager.get_history(session_id).messages)
     try:
         return await asyncio.wait_for(
-            _ai_completion(session_id, user_content, history),
+            _ai_completion(session_id, user_content, history, event),
             timeout=config.AGENT_CONFIG["TURN_TIMEOUT"],
         )
     except asyncio.TimeoutError:
@@ -95,7 +97,7 @@ async def ai_completion(session_id, user_content):
         return _empty_completion()
 
 
-async def _ai_completion(session_id, user_content, history_msgs):
+async def _ai_completion(session_id, user_content, history_msgs, event=None):
     """输入会话标识和消息内容，返回生成的文本回复。"""
     try:
         user_id = session_id
@@ -104,21 +106,24 @@ async def _ai_completion(session_id, user_content, history_msgs):
         if not user_content:
             return _empty_completion()
 
-        # Mem0 是同步客户端，放入工作线程以免阻塞 WebSocket 事件循环。
         user_text = "".join([p.get("text", "") for p in user_content if isinstance(p, dict) and p.get("type") == "text"])
-        out("📚 开始查询长期记忆", "")
-        try:
-            long_mem = await asyncio.wait_for(
-                asyncio.to_thread(get_long_memory_text, memory_pool, user_id, user_text),
-                timeout=10.0
-            )
-            out("✅ 长期记忆查询完成", "")
-        except asyncio.TimeoutError:
-            out("⏱️ 长期记忆查询超时，跳过")
-            long_mem = "（无）"
-        except Exception as e:
-            out("⚠️ 长期记忆查询失败", e)
-            long_mem = "（无）"
+        if config.ENABLE_LONG_TERM_MEMORY:
+            # Mem0 是同步客户端，放入工作线程以免阻塞 WebSocket 事件循环。
+            out("📚 开始查询长期记忆", "")
+            try:
+                long_mem = await asyncio.wait_for(
+                    asyncio.to_thread(get_long_memory_text, memory_pool, user_id, user_text),
+                    timeout=10.0
+                )
+                out("✅ 长期记忆查询完成", "")
+            except asyncio.TimeoutError:
+                out("⏱️ 长期记忆查询超时，跳过")
+                long_mem = "（无）"
+            except Exception as e:
+                out("⚠️ 长期记忆查询失败", e)
+                long_mem = "（无）"
+        else:
+            long_mem = "（未启用）"
 
         out("🏁 [ai_completion] 调用 chain, session:", session_id)
         out("📝 [ai_completion] 用户输入:", str(user_content)[:100])
@@ -158,7 +163,8 @@ async def _ai_completion(session_id, user_content, history_msgs):
                     response = await chain.ainvoke(
                         {"input": [input_msg], "long_memory": long_mem,
                          "emoji_options": emoji_options, "history": history_msgs,
-                         "prompt_context": prompt_context},
+                         "prompt_context": prompt_context,
+                         "qq_context": build_reply_action_context(event) if event else {}},
                         run_config={"configurable": {"session_id": session_id}},
                     )
                     response_received = True
@@ -187,7 +193,9 @@ async def _ai_completion(session_id, user_content, history_msgs):
                         return _empty_completion()
                     model_content = response.get("model_content", content) if isinstance(response, dict) else content
                     try:
-                        content, emoji_name = parse_emoji_reply(content, emoji_options)
+                        content, emoji_name, actions = parse_emoji_reply(
+                            content, emoji_options,
+                            build_reply_action_context(event) if event else {})
                     except ValueError as error:
                         out("⛔ 回复协议解析失败，本轮不发送", error)
                         cleanup_rendered_images(rendered_ids)
@@ -198,6 +206,7 @@ async def _ai_completion(session_id, user_content, history_msgs):
                     return {
                         "text": content,
                         "emoji": emoji_name,
+                        "actions": actions,
                         "rendered_image_ids": rendered_ids,
                         "memory_turn": {"user_id": user_id, "user_text": user_text},
                         "model_content": model_content,
@@ -354,20 +363,25 @@ async def handle_message(websocket, event, user_content):
         msg_type = event.get("message_type")
         out("⏳ 当前会话:", session_id)
 
-        completion = await ai_completion(session_id, user_content)
+        completion = await ai_completion(session_id, user_content, event=event)
         if isinstance(completion, dict):
             content = completion.get("text", "")
             emoji_name = completion.get("emoji")
+            actions = completion.get("actions", [])
             rendered_ids = completion.get("rendered_image_ids", [])
         else:
             content = completion
             emoji_name = None
+            actions = []
             rendered_ids = []
 
-        if not content and not rendered_ids:
+        if not content and not rendered_ids and not actions:
             return
 
         message_segments = []
+        message_segments.extend(
+            {"type": "at", "data": {"qq": action["qq"]}}
+            for action in actions if action.get("type") == "at")
         if content:
             message_segments.append({"type": "text", "data": {"text": content}})
 
@@ -376,9 +390,16 @@ async def handle_message(websocket, event, user_content):
             out("⛔ 渲染附件不完整，本轮不发送成功文案、不写入回复记忆")
             return
         message_segments.extend(images)
-        if not message_segments:
-            return
-        if not await send_message(websocket, build_params("segments", event, message_segments)):
+        message_sent = True
+        if message_segments:
+            message_sent = await send_message(websocket, build_params("segments", event, message_segments))
+
+        poke_sent = True
+        for action in (action for action in actions if action.get("type") == "poke"):
+            if not await send_message(
+                    websocket, build_poke_params(event, action["qq"]), action="send_poke"):
+                poke_sent = False
+        if not message_sent or not poke_sent:
             return
 
         if event.get("_proactive_reply"):

@@ -327,6 +327,9 @@ RAN_REP_PROBABILITY = 3
 # 会话记忆超时时间（秒）
 HISTORY_TIMEOUT = 3600  # 闲置一小时后过期
 
+# 是否启用 Mem0 长期记忆，修改后重启机器人
+ENABLE_LONG_TERM_MEMORY = False
+
 # 新会话初始化时导入的历史条数；存活期间不按条数裁剪
 MESSAGE_COUNT = 15
 ```
@@ -709,9 +712,8 @@ asyncio.run(send_daily_fortune())
 # 在 api_key.env 中添加：
 ZILLIZ_API_KEY="your_zilliz_api_key"
 
-# 方案 2：禁用长期记忆
-# 在 function_long_turn_memory.py 中注释掉 Mem0 初始化
-# 或在 my_proxy.py 中跳过长期记忆相关调用
+# 方案 2：在 src/qqbot/config/config.py 中关闭长期记忆
+ENABLE_LONG_TERM_MEMORY = False
 ```
 
 #### Q: 短期记忆清空太快/太慢

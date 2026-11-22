@@ -11,7 +11,7 @@ class LocalDictStore:
     def __init__(self, *args, **kwargs):
         self.m = None
         self._init_lock = threading.Lock()
-        self._enabled = config.ENABLE_MEM0
+        self._enabled = config.ENABLE_LONG_TERM_MEMORY
 
     def _get_client(self):
         """返回已初始化的 Mem0 客户端；初始化失败时允许下次请求重试。"""
