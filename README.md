@@ -164,7 +164,7 @@ Python 3.11 以下由 `requirements.txt` 中的 `tomli` 解析 TOML。
 
 ### 模型 API 原始调试日志
 
-`src/qqbot/config/config.py` 中的 `ENABLE_LLM_API_DEBUG = False` 默认关闭。开启后，模型 API 的请求和响应会按时间写入服务器本地的 `logs/llm_api_debug.txt`，也可以通过环境变量 `LLM_API_DEBUG_FILE` 指定路径。日志包含请求体、响应体、时间、状态码和耗时，认证请求头会脱敏。日志可能包含完整提示词、聊天记录和模型返回内容，只应在排查问题时短时间开启，确认后重启关闭。
+`src/qqbot/config/config.py` 中的 `ENABLE_LLM_API_DEBUG = False` 默认关闭。开启后，模型 API 的请求和响应会按时间写入服务器本地的 `logs/llm_api_debug.txt`，也可以通过环境变量 `LLM_API_DEBUG_FILE` 指定路径。日志包含请求体、响应体、时间、状态码和耗时，认证请求头会脱敏。图片 base64 默认只记录占位符和原始长度，`LLM_API_DEBUG_INCLUDE_IMAGE_DATA = True` 才会保留图片数据；`LLM_API_DEBUG_MAX_BODY_CHARS` 默认限制单个请求或响应日志为 200000 字符。日志可能包含完整提示词、聊天记录和模型返回内容，只应在排查问题时短时间开启，确认后重启关闭。
 
 ### 自然语言回复判定
 

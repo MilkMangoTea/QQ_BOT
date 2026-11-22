@@ -1,6 +1,7 @@
 """Optional raw HTTP logging for model API requests."""
 
 import json
+import re
 import threading
 import time
 import uuid
@@ -14,6 +15,8 @@ from src.qqbot.config import config
 
 _WRITE_LOCK = threading.Lock()
 _DEBUG_STATE_KEY = "qqbot_api_debug"
+_IMAGE_DATA_KEYS = {"b64_json", "base64", "image_base64", "image_data", "image_bytes"}
+_DATA_URL_PATTERN = re.compile(r"data:(image/[^;,]+);base64,([A-Za-z0-9+/=\r\n]+)")
 
 
 def _enabled() -> bool:
@@ -28,8 +31,44 @@ def _timestamp() -> str:
     return datetime.now().astimezone().isoformat(timespec="milliseconds")
 
 
+def _image_placeholder(value: str) -> str:
+    return f"[image data omitted: {len(value)} chars]"
+
+
+def _sanitize_value(value, key=None):
+    if isinstance(value, dict):
+        return {item_key: _sanitize_value(item, item_key) for item_key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_value(item, key) for item in value]
+    if isinstance(value, str):
+        key_name = str(key or "").lower()
+        if key_name in _IMAGE_DATA_KEYS and len(value) > 128:
+            return _image_placeholder(value)
+        if _DATA_URL_PATTERN.fullmatch(value.strip()):
+            return _image_placeholder(value)
+    return value
+
+
+def _limit(text: str) -> str:
+    limit = max(0, int(getattr(config, "LLM_API_DEBUG_MAX_BODY_CHARS", 200000)))
+    if not limit or len(text) <= limit:
+        return text
+    return f"{text[:limit]}\n[body truncated: original length {len(text)} chars]"
+
+
 def _text(value: bytes) -> str:
-    return value.decode("utf-8", errors="replace")
+    text = value.decode("utf-8", errors="replace")
+    if getattr(config, "LLM_API_DEBUG_INCLUDE_IMAGE_DATA", False):
+        return _limit(text)
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        sanitized = _DATA_URL_PATTERN.sub(lambda match: _image_placeholder(match.group(0)), text)
+    else:
+        sanitized = json.dumps(
+            _sanitize_value(parsed), ensure_ascii=False, separators=(",", ":"),
+        )
+    return _limit(sanitized)
 
 
 def _headers(headers: httpx.Headers) -> str:
