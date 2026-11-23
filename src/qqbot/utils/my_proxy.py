@@ -26,6 +26,7 @@ from src.qqbot.core.function_completion import (
     create_agent_chain_with_memory,
     get_long_memory_text,
     lc_message_to_text,
+    normalize_tagged_reply,
     parse_reply,
 )
 from src.qqbot.core.function_fortune import setup_daily_fortune_scheduler
@@ -192,7 +193,10 @@ async def _ai_completion(session_id, user_content, history_msgs):
                         return _empty_completion()
                     model_content = response.get("model_content", content) if isinstance(response, dict) else content
                     try:
-                        content, emoji_name, actions = parse_reply(content, emoji_options)
+                        normalized = normalize_tagged_reply(content)
+                        if normalized != content:
+                            model_content = normalized
+                        content, emoji_name, actions = parse_reply(normalized, emoji_options)
                     except ValueError as error:
                         out("⛔ 回复协议解析失败，本轮不发送", error)
                         cleanup_rendered_images(rendered_ids)

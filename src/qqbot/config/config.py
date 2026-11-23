@@ -28,7 +28,7 @@ ENABLE_NATURAL_LANGUAGE_REPLY = True
 ENABLE_LONG_TERM_MEMORY = False
 
 # 模型 API 原始请求调试日志：开启后写入服务器本地文本文件，修改后重启生效。
-ENABLE_LLM_API_DEBUG = False
+ENABLE_LLM_API_DEBUG = True
 LLM_API_DEBUG_FILE = Path(os.getenv(
     "LLM_API_DEBUG_FILE",
     str(Path(__file__).resolve().parents[3] / "logs" / "llm_api_debug.txt"),

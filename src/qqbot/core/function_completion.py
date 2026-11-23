@@ -212,6 +212,28 @@ def emoji_reply_instruction(emoji_options) -> str:
     return f"【可选表情】{choices}"
 
 
+_TAGGED_ACTIONS = re.compile(r"^\\?<actions>\s*(.*?)\s*\\?</actions>", re.DOTALL)
+
+
+def normalize_tagged_reply(text):
+    """Convert a leading actions block and trailing text to the reply protocol."""
+    if not text.startswith(("<actions>", r"\<actions>")):
+        return text
+    match = _TAGGED_ACTIONS.match(text)
+    if match is None:
+        raise ValueError("回复的 actions 标签未闭合")
+    try:
+        actions = json.loads(match[1])
+    except json.JSONDecodeError:
+        raise ValueError("回复的 actions 标签内容不是有效的 JSON") from None
+    if isinstance(actions, dict):
+        actions = [actions]
+    if not isinstance(actions, list):
+        raise ValueError("回复的 actions 标签需要包含动作或动作数组")
+    return json.dumps({"reply": text[match.end():].strip(), "emoji": None, "actions": actions},
+                      ensure_ascii=False)
+
+
 def parse_reply(content, emoji_options):
     """解析已验收的回复、表情和待解析目标的 QQ 动作。"""
     text = lc_message_to_text(content).strip()
