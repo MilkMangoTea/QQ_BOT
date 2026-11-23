@@ -7,7 +7,7 @@ from src.qqbot.core.function_completion import (
     should_reply_langchain,
 )
 from src.qqbot.core.function_session_memory import calc_session_id
-from src.qqbot.core.function_message import QQMessageParser, event_message, normalize_message
+from src.qqbot.core.function_message import QQMessageParser, event_message, normalize_message, sender_id, sender_name
 from src.qqbot.utils.console import out
 from src.qqbot.utils.image_uploader import get_image_url_or_fallback, to_onebot_image_file
 
@@ -32,26 +32,28 @@ def build_poke_params(event, target_id):
     return {"user_id": event["user_id"], "target_id": target_id}
 
 
-def build_reply_action_context(event):
-    """Expose only QQ IDs present in the current event to the model."""
-    allowed = set()
-    sender = event.get("sender") if isinstance(event.get("sender"), dict) else {}
-    sender_id = sender.get("user_id", event.get("user_id"))
-    for value in (event.get("user_id"), sender_id, config.SELF_USER_ID):
-        if value is not None:
-            allowed.add(str(value))
-    for segment in normalize_message(event_message(event)):
-        if segment.get("type") != "at":
+def resolve_reply_actions(actions, event, memory_manager, session_id):
+    """Resolve model-selected nicknames to IDs within this conversation."""
+    is_group = event.get("message_type") == "group"
+    current_sender = str(sender_id(event))
+    resolved = []
+    seen = set()
+    for action in actions:
+        kind, target = action["type"], action.get("target")
+        if kind == "at" and not is_group:
             continue
-        qq = (segment.get("data") or {}).get("qq")
-        if qq is not None:
-            allowed.add(str(qq))
-    return {
-        "message_type": event.get("message_type"),
-        "sender_id": str(sender_id) if sender_id is not None else None,
-        "bot_id": str(config.SELF_USER_ID),
-        "allowed_qq": sorted(allowed),
-    }
+        if target is None or (not is_group and target == sender_name(event).strip()):
+            qq = current_sender
+        elif is_group:
+            qq = memory_manager.resolve_participant(session_id, target)
+        else:
+            continue
+        if not qq or not qq.isascii() or not qq.isdecimal():
+            continue
+        if (kind, qq) not in seen:
+            resolved.append({"type": kind, "qq": qq})
+            seen.add((kind, qq))
+    return resolved
 
 
 # 随机回复

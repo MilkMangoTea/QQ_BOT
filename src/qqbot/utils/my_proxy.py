@@ -16,7 +16,7 @@ from src.qqbot.core.function import (
     get_available_emojis,
     build_params_text_only,
     build_poke_params,
-    build_reply_action_context,
+    resolve_reply_actions,
     process_single_message,
     ran_rep_text_only,
     is_allowed_group,
@@ -26,7 +26,7 @@ from src.qqbot.core.function_completion import (
     create_agent_chain_with_memory,
     get_long_memory_text,
     lc_message_to_text,
-    parse_emoji_reply,
+    parse_reply,
 )
 from src.qqbot.core.function_fortune import setup_daily_fortune_scheduler
 from src.qqbot.core.function_long_turn_memory import LocalDictStore
@@ -84,12 +84,12 @@ def _empty_completion():
     return {"text": "", "emoji": None, "actions": [], "rendered_image_ids": []}
 
 
-async def ai_completion(session_id, user_content, event=None):
+async def ai_completion(session_id, user_content):
     """Apply one total deadline to memory lookup and all agent attempts."""
     history = list(memory_manager.get_history(session_id).messages)
     try:
         return await asyncio.wait_for(
-            _ai_completion(session_id, user_content, history, event),
+            _ai_completion(session_id, user_content, history),
             timeout=config.AGENT_CONFIG["TURN_TIMEOUT"],
         )
     except asyncio.TimeoutError:
@@ -97,7 +97,7 @@ async def ai_completion(session_id, user_content, event=None):
         return _empty_completion()
 
 
-async def _ai_completion(session_id, user_content, history_msgs, event=None):
+async def _ai_completion(session_id, user_content, history_msgs):
     """输入会话标识和消息内容，返回生成的文本回复。"""
     try:
         user_id = session_id
@@ -163,8 +163,7 @@ async def _ai_completion(session_id, user_content, history_msgs, event=None):
                     response = await chain.ainvoke(
                         {"input": [input_msg], "long_memory": long_mem,
                          "emoji_options": emoji_options, "history": history_msgs,
-                         "prompt_context": prompt_context,
-                         "qq_context": build_reply_action_context(event) if event else {}},
+                         "prompt_context": prompt_context},
                         run_config={"configurable": {"session_id": session_id}},
                     )
                     response_received = True
@@ -193,9 +192,7 @@ async def _ai_completion(session_id, user_content, history_msgs, event=None):
                         return _empty_completion()
                     model_content = response.get("model_content", content) if isinstance(response, dict) else content
                     try:
-                        content, emoji_name, actions = parse_emoji_reply(
-                            content, emoji_options,
-                            build_reply_action_context(event) if event else {})
+                        content, emoji_name, actions = parse_reply(content, emoji_options)
                     except ValueError as error:
                         out("⛔ 回复协议解析失败，本轮不发送", error)
                         cleanup_rendered_images(rendered_ids)
@@ -363,11 +360,12 @@ async def handle_message(websocket, event, user_content):
         msg_type = event.get("message_type")
         out("⏳ 当前会话:", session_id)
 
-        completion = await ai_completion(session_id, user_content, event=event)
+        completion = await ai_completion(session_id, user_content)
         if isinstance(completion, dict):
             content = completion.get("text", "")
             emoji_name = completion.get("emoji")
-            actions = completion.get("actions", [])
+            actions = resolve_reply_actions(
+                completion.get("actions", []), event, memory_manager, session_id)
             rendered_ids = completion.get("rendered_image_ids", [])
         else:
             content = completion

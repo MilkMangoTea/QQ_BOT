@@ -91,9 +91,9 @@ def event_message(event):
     return message if message is not None else event.get("raw_message", "")
 
 
-def sender_name(event):
+def sender_name(event, default="群友"):
     sender = event.get("sender") if isinstance(event.get("sender"), dict) else {}
-    return _text(sender.get("card") or sender.get("nickname") or event.get("nickname") or event.get("name") or "群友", 80)
+    return _text(sender.get("card") or sender.get("nickname") or event.get("nickname") or event.get("name") or default, 80)
 
 
 def sender_id(event):
@@ -284,9 +284,9 @@ class QQMessageParser:
                 elif kind == "at":
                     target = _text(data.get("qq"))
                     if target == self.self_user_id:
-                        text = "(系统提示:对方想和你说话)"
+                        text = "@你"
                     elif target == "all":
-                        text = "(系统提示:对方在和全体成员说话)"
+                        text = "@全体成员"
                     else:
                         text = f"[@{_text(data.get('name'), 80) or '其他群友'}]"
                     self._append(parts, text)

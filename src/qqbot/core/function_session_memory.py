@@ -2,7 +2,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -43,6 +43,7 @@ class SessionMemory:
     last_proactive_reply_time: float = 0.0  # 上次主动插话的时间
     is_initialized: bool = False
     source_messages: Dict[str, Dict] = field(default_factory=dict)
+    participant_ids: Dict[str, Set[str]] = field(default_factory=dict)
     prompt_context: PromptContext = field(default_factory=PromptContext)
 
     def touch(self) -> None:
@@ -107,6 +108,7 @@ class MemoryManager:
 
         # 清空现有历史
         session.history.clear()
+        session.participant_ids.clear()
         session.prompt_context = PromptContext()
         parser = parser or QQMessageParser(
             SELF_USER_ID, quote_chars=500,
@@ -154,15 +156,22 @@ class MemoryManager:
         out("✅ 会话历史已初始化", f"{session_id}，加载 {len(session.history.messages)} 条")
 
     def cache_message(self, session_id, event):
-        """Keep a bounded, per-conversation cache for reply IDs and sequences."""
+        """Remember group senders and cache recent messages for quote lookup."""
         if not isinstance(event, dict):
             return
+        session = self.get_or_create_session(session_id)
+        if session_id.startswith("group:"):
+            name = sender_name(event, default="").strip()
+            qq = str(sender_id(event))
+            if name and qq.isascii() and qq.isdecimal():
+                session.participant_ids.setdefault(name, set()).add(qq)
+
         message_id = event.get("message_id")
         seq = event.get("message_seq", event.get("seq"))
         if message_id is None and seq is None:
             return
         key = f"id:{message_id}" if message_id is not None else f"seq:{seq}"
-        source = self.get_or_create_session(session_id).source_messages
+        source = session.source_messages
         source.pop(key, None)
         source[key] = event
         while len(source) > max(30, self._context_window * 3):
@@ -177,6 +186,13 @@ class MemoryManager:
                 if str(event.get("message_seq", event.get("seq"))) == str(seq):
                     return event
         return session.source_messages.get(f"id:{message_id}") if message_id is not None else None
+
+    def resolve_participant(self, session_id, name):
+        session = self._sessions.get(session_id)
+        if session is None or session.is_expired(self._timeout):
+            return None
+        ids = session.participant_ids.get(name, ())
+        return next(iter(ids)) if len(ids) == 1 else None
 
     def get_history(self, session_id: str) -> BaseChatMessageHistory:
         """读取完整会话历史；调用者取快照，写入使用 add_* 方法。"""
